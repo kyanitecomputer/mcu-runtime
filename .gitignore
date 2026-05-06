@@ -1,0 +1,13 @@
+/target/
+app-rot/target/
+
+# ColdFire build artifacts
+app-coprocessor/coldfire/test/host/test_executor
+app-coprocessor/coldfire/test/host/test_async_sm
+app-coprocessor/coldfire/test/host/test_ring
+app-coprocessor/coldfire/test/host/*.o
+app-coprocessor/coldfire/test/host/*.gcda
+app-coprocessor/coldfire/test/host/*.gcno
+app-coprocessor/coldfire/*.bin
+app-coprocessor/coldfire/*.elf
+app-coprocessor/coldfire/*.map
