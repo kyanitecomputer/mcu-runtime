@@ -2,54 +2,71 @@
 name        = "app-rot"
 version     = "0.1.0"
 edition     = "2021"
-description = "Embassy-based firmware binaries for ASPEED MCU coprocessors (Root-of-Trust)"
+description = "Root of Trust firmware for ASPEED security processors (AST10x0, AST2700 BootMCU)"
 repository  = "https://github.com/kyanitecomputer/aspeed-mcu-runtime"
 publish     = false
 
+[lib]
+name = "app_rot"
+path = "src/lib.rs"
+
 # ── Firmware binaries ──────────────────────────────────────────────────────────
-# AST2600 SSP (Cortex-M3)
-[[bin]]
-name = "hello_uart"
-path = "src/bin/hello_uart.rs"
 
+# AST1060 — PFR processor (Cortex-M4F 200MHz, HACE, 4× QSPI monitor)
 [[bin]]
-name = "blinky"
-path = "src/bin/blinky.rs"
+name = "rot_ast1060"
+path = "src/bin/rot_ast1060.rs"
 
+# AST1080 — Hardened RoT (Cortex-M4F 400MHz, Caliptra, anti-tamper, PUF)
 [[bin]]
-name = "ipc_echo"
-path = "src/bin/ipc_echo.rs"
+name = "rot_ast1080"
+path = "src/bin/rot_ast1080.rs"
 
-# AST1060 (Cortex-M4F)
+# AST1040 — BIC / BMC processor (Cortex-M4F 400MHz, Caliptra, eSPI, USB)
+[[bin]]
+name = "rot_ast1040"
+path = "src/bin/rot_ast1040.rs"
+
+# AST2700 BootMCU — Secure boot MCU (RV32IMC 400MHz, Caliptra lifecycle)
+[[bin]]
+name = "rot_ast2700_bootmcu"
+path = "src/bin/rot_ast2700_bootmcu.rs"
+
+# ── Diagnostics (for hardware bring-up and debugging) ─────────────────────────
+
 [[bin]]
 name = "hello_uart_ast1060"
 path = "src/bin/hello_uart_ast1060.rs"
 
 [[bin]]
-name = "blinky_ast1060"
-path = "src/bin/blinky_ast1060.rs"
-
-# AST2700 BootMCU (RV32IMC)
-[[bin]]
 name = "hello_uart_bootmcu"
 path = "src/bin/hello_uart_bootmcu.rs"
 
 [[bin]]
-name = "ipc_echo_bootmcu"
-path = "src/bin/ipc_echo_bootmcu.rs"
+name = "uart5_bare"
+path = "src/bin/uart5_bare.rs"
+
+[[bin]]
+name = "uart5_systick"
+path = "src/bin/uart5_systick.rs"
 
 # ── Feature flags ──────────────────────────────────────────────────────────────
 [features]
 default = ["defmt"]
 
-# Select exactly one chip per build invocation.
-ast2600-ssp = [
-    "embassy-aspeed/ast2600-ssp",
+# SoC selection — exactly one per build invocation.
+ast1060 = [
+    "embassy-aspeed/ast1060",
     "dep:cortex-m",
     "dep:cortex-m-rt",
 ]
-ast1060 = [
-    "embassy-aspeed/ast1060",
+ast1080 = [
+    # TODO: add embassy-aspeed/ast1080 when HAL support lands
+    "dep:cortex-m",
+    "dep:cortex-m-rt",
+]
+ast1040 = [
+    # TODO: add embassy-aspeed/ast1040 when HAL support lands
     "dep:cortex-m",
     "dep:cortex-m-rt",
 ]
@@ -59,30 +76,25 @@ ast2700-bootmcu = [
     "dep:riscv-rt",
 ]
 
-defmt = ["embassy-aspeed/defmt"]
+defmt = ["embassy-aspeed/defmt", "dep:defmt"]
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
 [dependencies]
-# Async HAL — relative path dep to aspeed-rs sibling repo.
-# Post-push: switch to git = "https://github.com/kyanitecomputer/aspeed-rs", rev = "<sha>"
 embassy-aspeed = { path = "../../aspeed-rs/embassy-aspeed" }
 
 embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = ["executor-thread"] }
 embassy-time     = { git = "https://github.com/embassy-rs/embassy", features = ["tick-hz-1_000_000"] }
 
-# Chip-specific runtime support (pulled in by feature flags above).
 cortex-m    = { version = "0.7", features = ["inline-asm", "critical-section-single-core"], optional = true }
 cortex-m-rt = { version = "0.7", optional = true }
 riscv    = { version = "0.11", features = ["critical-section-single-hart"], optional = true }
 riscv-rt = { version = "0.12", optional = true }
 
-# Embedded HAL traits — needed directly by firmware binaries.
 embedded-io       = "0.6"
 embedded-io-async = "0.6"
 
-defmt = "0.3"
+defmt = { version = "0.3", optional = true }
 
-# defmt-rtt and panic-halt are architecture-specific.
 [target.'cfg(target_arch = "arm")'.dependencies]
 defmt-rtt  = "0.4"
 panic-halt = "0.2"
