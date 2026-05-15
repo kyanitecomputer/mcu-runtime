@@ -1,0 +1,8 @@
+# ── AST2600 SSP (ARM Cortex-M3) ──────────────────────────────────────────────
+[target.thumbv7m-none-eabi]
+runner = "probe-rs run --chip-description-path probe-rs-targets/AST2600_SSP.yaml"
+
+rustflags = [
+    "-C", "link-arg=-Tlink.x",
+    "-C", "link-arg=--nmagic",
+]

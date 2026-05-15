@@ -1,0 +1,89 @@
+[package]
+name        = "app-ssp"
+version     = "0.1.0"
+edition     = "2021"
+description = "Embassy-based coprocessor firmware for ASPEED SSP/TSP cores (sensor DAQ, fan control, IPC)"
+repository  = "https://github.com/kyanitecomputer/aspeed-mcu-runtime"
+publish     = false
+
+[lib]
+name = "app_ssp"
+path = "src/lib.rs"
+
+# ── Firmware binaries ──────────────────────────────────────────────────────────
+
+# AST2600 SSP (Cortex-M3 200MHz)
+[[bin]]
+name = "ssp_ast2600"
+path = "src/bin/ssp_ast2600.rs"
+
+# AST2700 SSP (Cortex-M4 400MHz)
+[[bin]]
+name = "ssp_ast2700"
+path = "src/bin/ssp_ast2700.rs"
+
+# AST2700 TSP (Cortex-M4 400MHz — CAN, LTPI, PSU)
+[[bin]]
+name = "tsp_ast2700"
+path = "src/bin/tsp_ast2700.rs"
+
+# ── Diagnostics ───────────────────────────────────────────────────────────────
+
+[[bin]]
+name = "hello_uart"
+path = "src/bin/hello_uart.rs"
+
+[[bin]]
+name = "ipc_echo"
+path = "src/bin/ipc_echo.rs"
+
+# ── Feature flags ──────────────────────────────────────────────────────────────
+[features]
+default = []
+
+# SoC selection — exactly one per build invocation.
+ast2600-ssp = [
+    "embassy-aspeed/ast2600-ssp",
+    "dep:cortex-m",
+    "dep:cortex-m-rt",
+]
+ast2700-ssp = [
+    # TODO: add embassy-aspeed/ast2700-ssp when HAL support lands
+    "dep:cortex-m",
+    "dep:cortex-m-rt",
+]
+ast2700-tsp = [
+    # TODO: add embassy-aspeed/ast2700-tsp when HAL support lands
+    "dep:cortex-m",
+    "dep:cortex-m-rt",
+]
+
+# ── Dependencies ───────────────────────────────────────────────────────────────
+[dependencies]
+embassy-aspeed = { path = "../../../aspeed-rs/embassy-aspeed" }
+
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = ["executor-thread"] }
+embassy-time     = { git = "https://github.com/embassy-rs/embassy", features = ["tick-hz-1_000_000"] }
+
+cortex-m    = { version = "0.7", features = ["inline-asm", "critical-section-single-core"], optional = true }
+cortex-m-rt = { version = "0.7", optional = true }
+
+embedded-io       = "0.6"
+embedded-io-async = "0.6"
+
+log = { version = "0.4", default-features = false }
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+panic-halt = "0.2"
+
+[profile.release]
+debug         = true
+opt-level     = "s"
+lto           = true
+codegen-units = 1
+panic         = "abort"
+
+[profile.dev]
+debug     = true
+opt-level = 1
+panic     = "abort"
