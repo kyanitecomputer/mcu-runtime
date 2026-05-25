@@ -1,5 +1,9 @@
 /target/
 app-rot/target/
+app-coprocessor/ssp/target/
+
+# Go tool binaries
+tools/ast1060-load/ast1060-load
 
 # ColdFire build artifacts
 app-coprocessor/coldfire/test/host/test_executor
