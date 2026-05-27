@@ -6,72 +6,135 @@ Firmware applications for ASPEED MCU cores.
 https://github.com/kyanitecomputer/aspeed-mcu-runtime
 ```
 
+## System architecture
+
+ASPEED BMC SoCs contain multiple processor cores spanning three ISAs and
+four runtime environments:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  AP Cores (main application processors)                          │
+│  AST2600: Cortex-A7      │  AST2700: Cortex-A35 ×4              │
+│  Runtime: bare-metal Go (TamaGo)                                 │
+│  Repo: aspeed-go                                                 │
+├────────────────────────────────┬─────────────────────────────────┤
+│  RoT Cores                    │  Coprocessor Cores               │
+│  (Root of Trust / PFR)        │  (Sensor DAQ / Fan / IPC)        │
+│                                │                                  │
+│  AST1060 Cortex-M4F (ARM)    │  AST2600 SSP Cortex-M3 (ARM)    │
+│  AST1080 Cortex-M4F (ARM)    │  AST2700 SSP Cortex-M4 (ARM)    │
+│  AST1040 Cortex-M4F (ARM)    │  AST2700 TSP Cortex-M4 (ARM)    │
+│  AST2700 BootMCU RV32 (RISC-V)│ AST2400/2500 ColdFire V1 (M68K)│
+│  Runtime: Rust + Embassy       │  Runtime: Rust + Embassy (ARM)  │
+│  Crate: app-rot                │           C + async.h (ColdFire)│
+│                                │  Crates: app-coprocessor/ssp    │
+│                                │          app-coprocessor/coldfire│
+├────────────────────────────────┴─────────────────────────────────┤
+│  Shared: aspeed-rs (HAL) → aspeed-data (PAC)                     │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+| ISA | Cores | Runtime | Language |
+|-----|-------|---------|----------|
+| ARMv7-A / ARMv8-A | AP (Cortex-A7, A35) | TamaGo bare-metal | Go |
+| ARMv7-M / ARMv7E-M | RoT + Coprocessor (Cortex-M3, M4F) | Embassy-rs async | Rust |
+| RV32IMC | AST2700 BootMCU (ibex) | Embassy-rs async | Rust |
+| ColdFire V1 (M68K) | AST2400/2500 coprocessor | async.h protothreads | C |
+
 ## Structure
 
 ```
 aspeed-mcu-runtime/
-├── app-rot/                    Rust Embassy firmware (Root-of-Trust cores)
-│   └── src/bin/                one .rs file per firmware binary
-└── app-coprocessor/
-    └── coldfire/               C SDK for ColdFire V1 coprocessors (AST2400/AST2500)
-        ├── include/            HAL headers + PAC headers
-        ├── src/                HAL drivers + async runtime
-        ├── linker/             Linker scripts (cfv1-ast2400.ld, cfv1-ast2500.ld)
-        ├── template/           Minimal user project template
-        └── test/host/          Host-native unit tests (24/24 passing)
+├── app-rot/                    Root of Trust firmware
+│   ├── src/
+│   │   ├── lib.rs              PFR core, protocols, crypto, manifests
+│   │   ├── pfr/                NIST SP 800-193 state machine
+│   │   ├── protocol/           MCTP, SPDM, Cerberus, PLDM
+│   │   ├── crypto/             HACE / Caliptra crypto service
+│   │   ├── manifest/           PFM, CFM, PCD management
+│   │   ├── flash/              SPI flash + A/B image management
+│   │   ├── provision/          MCTP-based provisioning
+│   │   ├── event_log/          Hash-chained attestation log
+│   │   ├── platform/           Intel / AMD / generic PFR
+│   │   └── bin/                firmware entries + diagnostics
+│   └── Cargo.toml
+├── app-coprocessor/
+│   ├── ssp/                    Coprocessor firmware (Embassy Rust)
+│   │   ├── src/
+│   │   │   ├── lib.rs          sensor DAQ, fan control, IPC, protocols
+│   │   │   ├── sensor/         Sensor polling + data model
+│   │   │   ├── fan_control/    PID / thermal table per zone
+│   │   │   ├── mailbox/        HW mailbox IPC (AP ↔ coprocessor)
+│   │   │   ├── protocol/       MCTP, PLDM Type 2, SPDM
+│   │   │   ├── board_config/   Per-board sensor tables
+│   │   │   └── bin/            firmware entries + diagnostics
+│   │   └── Cargo.toml
+│   └── coldfire/               ColdFire V1 C SDK (AST2400/AST2500)
+│       ├── include/            HAL + PAC headers
+│       ├── src/                HAL drivers + async runtime
+│       └── Makefile
+└── tools/
+    ├── ast1060-load/           UART boot loader (Go)
+    ├── gen-flash-image.sh
+    └── gen-uart-image.sh
 ```
 
-## app-rot — Embassy firmware binaries
+## Supported SoCs
 
-Library crate [`aspeed-rs`](https://github.com/kyanitecomputer/aspeed-rs) provides the HAL; this repo provides the application binaries.
+### Root of Trust (app-rot)
 
-| Binary | Chip | Target | Description |
-|--------|------|--------|-------------|
-| `hello_uart` | AST2600 SSP | `thumbv7m-none-eabi` | UART11 hello world + 1 Hz counter |
-| `blinky` | AST2600 SSP | `thumbv7m-none-eabi` | GPIO blink |
-| `ipc_echo` | AST2600 SSP | `thumbv7m-none-eabi` | IPC doorbell echo |
-| `hello_uart_ast1060` | AST1060 | `thumbv7em-none-eabihf` | UART5 hello world |
-| `blinky_ast1060` | AST1060 | `thumbv7em-none-eabihf` | GPIO blink |
-| `hello_uart_bootmcu` | AST2700 BootMCU | `riscv32imc-unknown-none-elf` | UART12 hello world |
-| `ipc_echo_bootmcu` | AST2700 BootMCU | `riscv32imc-unknown-none-elf` | IPC1 echo |
+| SoC | CPU | ISA | Role | Feature | Status |
+|-----|-----|-----|------|---------|--------|
+| **AST1060** | Cortex-M4F 200MHz | ARMv7E-M | PFR processor | `ast1060` | HW verified |
+| **AST1080** | Cortex-M4F 400MHz | ARMv7E-M | Hardened RoT (Caliptra, PUF, anti-tamper) | `ast1080` | Stub |
+| **AST1040** | Cortex-M4F 400MHz | ARMv7E-M | BIC / BMC (Caliptra, eSPI, USB) | `ast1040` | Stub |
+| **AST2700 BootMCU** | ibex RV32IMC 400MHz | RISC-V | Secure boot MCU (Caliptra lifecycle) | `ast2700-bootmcu` | Compiles |
 
-## app-coprocessor/coldfire — ColdFire V1 C SDK
+### Coprocessor — Embassy Rust (app-coprocessor/ssp)
 
-Stackless cooperative async SDK for the ColdFire V1 (m68k) coprocessors embedded in AST2400 and AST2500. All 7 milestones complete. See `app-coprocessor/coldfire/README.md` for the 10-minute quickstart.
+| SoC | CPU | ISA | Role | Feature | Status |
+|-----|-----|-----|------|---------|--------|
+| **AST2600 SSP** | Cortex-M3 200MHz | ARMv7-M | Sensor/fan/IPC | `ast2600-ssp` | Compiles |
+| **AST2700 SSP** | Cortex-M4 400MHz | ARMv7E-M | Sensor/fan/IPC (I3C) | `ast2700-ssp` | Stub |
+| **AST2700 TSP** | Cortex-M4 400MHz | ARMv7E-M | CAN/LTPI/PSU | `ast2700-tsp` | Stub |
 
-PAC headers:
-- `include/pac/ast2400.h` / `include/pac/ast2500.h` — generated by [`aspeed-data`](https://github.com/kyanitecomputer/aspeed-data)
-- `include/pac/cvic.h`, `gpio.h`, `timer.h`, `uart.h` — hand-written (transitional; migrate to generated headers in Phase B of ROADMAP)
+### Coprocessor — C (app-coprocessor/coldfire)
+
+| SoC | CPU | ISA | Role | Status |
+|-----|-----|-----|------|--------|
+| **AST2400** | ColdFire V1 | M68K ISA_A+C | Sensor/fan/IPC | Complete (24/24 tests) |
+| **AST2500** | ColdFire V1 | M68K ISA_A+C | Sensor/fan/IPC | Complete (24/24 tests) |
 
 ## Dependencies
 
-| Repo | Used by | Via |
-|------|---------|-----|
-| [`aspeed-rs`](https://github.com/kyanitecomputer/aspeed-rs) | app-rot | `embassy-aspeed = { path = "../../aspeed-rs/embassy-aspeed" }` |
-| [`aspeed-data`](https://github.com/kyanitecomputer/aspeed-data) | app-rot (transitive) | through aspeed-rs → aspeed-pac |
+| Repo | Role | Used by |
+|------|------|---------|
+| [`aspeed-rs`](https://github.com/kyanitecomputer/aspeed-rs) | Embassy HAL | app-rot, app-ssp |
+| [`aspeed-data`](https://github.com/kyanitecomputer/aspeed-data) | PAC + generated headers | transitive (Rust + C) |
+| [`aspeed-go`](https://github.com/kyanitecomputer/aspeed-go) | TamaGo HAL for AP cores | separate repo, IPC peer |
 
-Post-push: path deps switch to `git = "https://github.com/kyanitecomputer/..."` with pinned rev.
-
-## Build and check
-
-All automation uses [Dagger](https://dagger.io). `aspeed-rs` and `aspeed-data` must be sibling directories.
+## Build
 
 ```sh
-# Compile all firmware binaries (all chip targets)
-dagger call check-rot --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
-
-# ColdFire host unit tests (no toolchain needed beyond GCC in container)
-dagger call check-coldfire
-
-# Full CI pipeline
+# Full CI (RoT + SSP + ColdFire + QEMU test)
 dagger call ci --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
+
+# Individual steps
+dagger call check-rot --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
+dagger call check-ssp --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
+dagger call check-coldfire
+dagger call qemu-test --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
 ```
 
-## Flashing
+## Flashing (AST1060 UART boot)
 
 ```sh
-# Flash AST2600 SSP via probe-rs (J-Link SWD)
 cd app-rot
-cargo run --bin hello_uart --features ast2600-ssp \
-    --target thumbv7m-none-eabi --release
+cargo build --bin rot_ast1060 --features ast1060 \
+    --target thumbv7em-none-eabihf --release
+rust-objcopy --strip-all -O binary \
+    target/thumbv7em-none-eabihf/release/rot_ast1060 /tmp/rot_ast1060.bin
+../tools/gen-uart-image.sh /tmp/rot_ast1060.bin /tmp/rot_ast1060_uart.bin
+../tools/ast1060-load/ast1060-load \
+    -port /dev/ttyUSB0 -wait 30s -monitor /tmp/rot_ast1060_uart.bin
 ```
