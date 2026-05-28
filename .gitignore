@@ -2,6 +2,14 @@
 app-rot/target/
 app-coprocessor/ssp/target/
 
+# Cargo target dir (shared, via --target-dir) and build outputs
+/aspeed-mcu-target/
+/out/
+
+# Prebuilt/flashable image blobs
+tools/*.bin
+tools/aspeed-uart-load/aspeed-uart-load
+
 # Go tool binaries
 tools/ast1060-load/ast1060-load
 
@@ -15,3 +23,9 @@ app-coprocessor/coldfire/test/host/*.gcno
 app-coprocessor/coldfire/*.bin
 app-coprocessor/coldfire/*.elf
 app-coprocessor/coldfire/*.map
+
+# Prebuilt test image blobs in tools/
+tools/*.elf
+tools/*.bin
+tools/*.map
+tools/*.dtb
