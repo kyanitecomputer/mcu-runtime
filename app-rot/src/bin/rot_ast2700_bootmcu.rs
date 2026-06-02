@@ -80,10 +80,14 @@ const A2_CA35_FW_ID: u32 = 9;
 // 0x8407_dc00 (RVBAR 0x4040_7dc0). Verify after every cairn change with:
 //   LOAD = firstSectionVMA - 0x3_8000_0000, OFF = e_entry - firstSectionVMA.
 //
-// PROVISIONAL — offsets move whenever the cairn build changes; a per-image
-// header or manifest field should replace these hardcodes (tracked as follow-up).
+// The CA35 entry offset is no longer hardcoded: the SoC image is prefixed with
+// a 16-byte boot header (imgtools a35-header) whose entry_off word is the byte
+// offset of _rt0 within the raw payload. The BootMCU reads it at load time, so
+// growing the cairn payload never requires bumping a constant here again.
 const A2_CA35_LOAD_ADDR: usize = 0x83FF_FF60;
-const A2_CA35_ENTRY_OFF: usize = 0x7_DCA0;
+/// Length of the CA35 boot header prefixed to the SoC image (see manifest
+/// RAW_A35_HEADER_*: magic, entry_off, payload_len, check — four u32 words).
+const A2_HDR_LEN: usize = 16;
 /// Whether the CA35 payload SoC image is LZ4-compressed (size-prepended). The
 /// current gen-a2-image.sh stores it uncompressed; flip once the pipeline
 /// compresses it.
@@ -414,38 +418,61 @@ fn load_ca35_payload_a2(uart: &mut Uart, hw: scu::HwRev) -> Option<usize> {
             return None;
         }
     };
-    let img = manifest.find(A2_FLSH_ID_CA35)?;
+	let img = manifest.find(A2_FLSH_ID_CA35)?;
 
-    if !authorize_ca35_a2(uart, img.size) {
-        return None;
-    }
+	if !authorize_ca35_a2(uart, img.size) {
+		return None;
+	}
 
-    uart.blocking_write(b"Load A35 (A2 FLSH)... ");
-    if A2_CA35_LZ4 {
-        // Compressed payload: expand straight into the DRAM load window.
-        let src = match manifest.image_slice(A2_FLSH_ID_CA35) {
-            Ok(s) => s,
-            Err(_) => return None,
-        };
-        // SAFETY: A2_CA35_LOAD_ADDR..+A35_PAYLOAD_SIZE is the fixed CA35 payload
-        // window in DRAM and does not overlap any live reference.
-        let dst = unsafe {
-            core::slice::from_raw_parts_mut(A2_CA35_LOAD_ADDR as *mut u8, A35_PAYLOAD_SIZE)
-        };
-        if embassy_aspeed::lz4::decompress_size_prepended_into(src, dst).is_err() {
-            uart.blocking_write(b"LZ4 FAIL\r\n");
-            return None;
-        }
-    } else {
-        // Uncompressed: word-copy from the XIP window to DRAM.
-        // SAFETY: fixed CA35 payload window; validated by the manifest bounds.
-        if unsafe { manifest.load_image(A2_FLSH_ID_CA35, A2_CA35_LOAD_ADDR) }.is_err() {
-            uart.blocking_write(b"COPY FAIL\r\n");
-            return None;
-        }
-    }
-    uart.blocking_write(b"OK\r\n");
-    Some(A2_CA35_LOAD_ADDR + A2_CA35_ENTRY_OFF)
+	// The SoC image is prefixed with the 16-byte CA35 boot header. Read it via
+	// XIP and recover the entry offset before copying; this removes the old
+	// hardcoded A2_CA35_ENTRY_OFF that had to be bumped on every payload change.
+	let hdr_addr = match manifest.image_addr(A2_FLSH_ID_CA35) {
+		Ok(a) => a,
+		Err(_) => return None,
+	};
+	let magic = rd32(hdr_addr);
+	let entry_off = rd32(hdr_addr + 4) as usize;
+	let payload_len = rd32(hdr_addr + 8);
+	let check = rd32(hdr_addr + 12);
+	if magic != RAW_A35_HEADER_MAGIC || check != (magic ^ (entry_off as u32) ^ payload_len) {
+		uart.blocking_write(b"A35 HEADER INVALID magic=");
+		print_hex32(uart, magic);
+		uart.blocking_write(b" - rebuild image (imgtools a35-header). Halting.\r\n");
+		return None;
+	}
+
+	uart.blocking_write(b"Load A35 (A2 FLSH)... ");
+	if A2_CA35_LZ4 {
+		// Compressed payload follows the header: expand from src[hdr..] into the
+		// DRAM load window.
+		let src = match manifest.image_slice(A2_FLSH_ID_CA35) {
+			Ok(s) => s,
+			Err(_) => return None,
+		};
+		// SAFETY: A2_CA35_LOAD_ADDR..+A35_PAYLOAD_SIZE is the fixed CA35 payload
+		// window in DRAM and does not overlap any live reference.
+		let dst = unsafe {
+			core::slice::from_raw_parts_mut(A2_CA35_LOAD_ADDR as *mut u8, A35_PAYLOAD_SIZE)
+		};
+		if embassy_aspeed::lz4::decompress_size_prepended_into(&src[A2_HDR_LEN..], dst).is_err() {
+			uart.blocking_write(b"LZ4 FAIL\r\n");
+			return None;
+		}
+	} else {
+		// Uncompressed: word-copy the payload (past the header) from the XIP
+		// window to DRAM, so raw payload byte 0 lands at A2_CA35_LOAD_ADDR.
+		// SAFETY: fixed CA35 payload window; validated by the manifest bounds.
+		unsafe {
+			embassy_aspeed::manifest::copy32(
+				A2_CA35_LOAD_ADDR,
+				hdr_addr + A2_HDR_LEN,
+				img.size as usize - A2_HDR_LEN,
+			)
+		};
+	}
+	uart.blocking_write(b"OK\r\n");
+	Some(A2_CA35_LOAD_ADDR + entry_off)
 }
 
 #[derive(Clone, Copy)]
@@ -642,10 +669,10 @@ async fn main(_spawner: Spawner) {
     // view) just before release. After release the CA35 owns UART12, so the
     // BootMCU stays silent from here on to avoid interleaving with the CA35
     // console output.
-    uart.blocking_write(b"CA35 entry ");
-    print_hex32(&mut uart, (A2_CA35_LOAD_ADDR + A2_CA35_ENTRY_OFF) as u32);
-    uart.blocking_write(b"=");
-    print_hex32(&mut uart, rd32(A2_CA35_LOAD_ADDR + A2_CA35_ENTRY_OFF));
+	uart.blocking_write(b"CA35 entry ");
+	print_hex32(&mut uart, a35_entry_addr as u32);
+	uart.blocking_write(b"=");
+	print_hex32(&mut uart, rd32(a35_entry_addr));
     uart.blocking_write(b"\r\nBootMCU done, releasing CA35 (UART -> CA35).\r\n");
     embedded_io::Write::flush(&mut uart).ok();
 
