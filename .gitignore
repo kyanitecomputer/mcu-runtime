@@ -1,10 +1,15 @@
 /target/
 app-rot/target/
 app-coprocessor/ssp/target/
+app-a35/target/
 
 # Cargo target dir (shared, via --target-dir) and build outputs
 /aspeed-mcu-target/
 /out/
+
+# Vendor reference blobs (Yocto/OpenBMC image dumps, DTBs, prebuilt firmware).
+# Kept on disk for reference but never tracked — regenerable from the BSP.
+tools/vendor/
 
 # Prebuilt/flashable image blobs
 tools/*.bin
@@ -24,8 +29,9 @@ app-coprocessor/coldfire/*.bin
 app-coprocessor/coldfire/*.elf
 app-coprocessor/coldfire/*.map
 
-# Prebuilt test image blobs in tools/
+# Prebuilt test image blobs and object files in tools/
 tools/*.elf
 tools/*.bin
 tools/*.map
 tools/*.dtb
+tools/*.o
