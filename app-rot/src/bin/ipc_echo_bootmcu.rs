@@ -14,9 +14,9 @@
 
 use embassy_aspeed as hal;
 use embassy_executor::Spawner;
+use embedded_io::Write as _;
 use hal::ipc1::Ipc1;
 use hal::uart::{Config, Uart};
-use embedded_io::Write as _;
 
 use defmt_rtt as _;
 use panic_halt as _;

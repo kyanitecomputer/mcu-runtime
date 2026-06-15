@@ -1,13 +1,12 @@
-//! AST2700 BootMCU: "Hello World" via UART12.
+//! AST2700 BootMCU: Embassy async hello — 1 Hz UART12 tick counter.
 //!
-//! Prints a greeting and a 1 Hz counter to UART12 (115200 8N1).
-//! UART12 clock = 24 MHz / 13 ≈ 1,846,153 Hz; divisor ≈ 1 → 115200 baud.
+//! Hardware-verified on AST2750-A1 silicon via SPI flash boot.
 //!
-//! # Build
+//! # Memory model
 //!
-//! ```sh
-//! just build-example-bootmcu hello_uart_bootmcu
-//! ```
+//! ROM copies the FMC binary from SPI flash into GSRAM at 0x14B80A00
+//! and jumps to it.  All code and data live in SRAM — no SDRAM dependency.
+//! SDRAM (0x80000000) requires DRAM training before use.
 
 #![no_std]
 #![no_main]
@@ -16,7 +15,6 @@ use embassy_aspeed as hal;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use hal::uart::{Config, Uart};
-use embedded_io::Write as _;
 
 use defmt_rtt as _;
 use panic_halt as _;
@@ -27,31 +25,33 @@ async fn main(_spawner: Spawner) {
 
     let mut uart = Uart::new_uart12(Config::default());
 
-    uart.blocking_write(b"AST2700 BootMCU - embassy-aspeed hello\r\n");
+    uart.blocking_write(b"BootMCU OK!\r\n");
 
     let mut count: u32 = 0;
     loop {
-        let mut buf = [0u8; 32];
-        let msg = format_u32(count, &mut buf);
-        uart.blocking_write(b"tick: ");
-        uart.blocking_write(msg);
+        uart.blocking_write(b"tick ");
+        write_u32(&mut uart, count);
         uart.blocking_write(b"\r\n");
         count = count.wrapping_add(1);
+
         Timer::after(Duration::from_secs(1)).await;
     }
 }
 
-/// Format a u32 as decimal into `buf`, returning the used slice.
-fn format_u32(mut n: u32, buf: &mut [u8; 32]) -> &[u8] {
+/// Write a u32 as decimal.
+fn write_u32(uart: &mut Uart, mut n: u32) {
     if n == 0 {
-        buf[0] = b'0';
-        return &buf[..1];
+        uart.write_byte(b'0');
+        return;
     }
+    let mut buf = [0u8; 10];
     let mut i = buf.len();
     while n > 0 {
         i -= 1;
         buf[i] = b'0' + (n % 10) as u8;
         n /= 10;
     }
-    &buf[i..]
+    for &b in &buf[i..] {
+        uart.write_byte(b);
+    }
 }

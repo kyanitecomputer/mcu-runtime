@@ -39,8 +39,32 @@ name = "hello_uart_ast1060"
 path = "src/bin/hello_uart_ast1060.rs"
 
 [[bin]]
+name = "caliptra_hello_bootmcu"
+path = "src/bin/caliptra_hello_bootmcu.rs"
+
+[[bin]]
 name = "hello_uart_bootmcu"
 path = "src/bin/hello_uart_bootmcu.rs"
+
+[[bin]]
+name = "spi_test_bootmcu"
+path = "src/bin/spi_test_bootmcu.rs"
+
+[[bin]]
+name = "spi_diag_bootmcu"
+path = "src/bin/spi_diag_bootmcu.rs"
+
+[[bin]]
+name = "spi_minimal_bootmcu"
+path = "src/bin/spi_minimal_bootmcu.rs"
+
+[[bin]]
+name = "sli_init_bootmcu"
+path = "src/bin/sli_init_bootmcu.rs"
+
+[[bin]]
+name = "dram_init_bootmcu"
+path = "src/bin/dram_init_bootmcu.rs"
 
 [[bin]]
 name = "uart5_bare"
@@ -76,13 +100,20 @@ ast2700-bootmcu = [
     "dep:riscv-rt",
 ]
 
+ast2700-bootmcu-defmt = [
+    "ast2700-bootmcu",
+    "defmt",
+    "embassy-aspeed/defmt-uart",
+]
+
 defmt = ["embassy-aspeed/defmt", "dep:defmt"]
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
 [dependencies]
-embassy-aspeed = { path = "../../aspeed-rs/embassy-aspeed" }
+embassy-aspeed = { path = "../../aspeed-rs/embassy-aspeed", default-features = false }
 
-embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = ["executor-thread"] }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", default-features = false, features = ["executor-thread"] }
+embassy-sync     = { git = "https://github.com/embassy-rs/embassy" }
 embassy-time     = { git = "https://github.com/embassy-rs/embassy", features = ["tick-hz-1_000_000"] }
 
 cortex-m    = { version = "0.7", features = ["inline-asm", "critical-section-single-core"], optional = true }
@@ -92,6 +123,12 @@ riscv-rt = { version = "0.12", optional = true }
 
 embedded-io       = "0.6"
 embedded-io-async = "0.6"
+heapless          = { version = "0.8", features = ["portable-atomic"] }
+static_cell       = "2"
+# riscv32imc has no native atomic CAS; portable-atomic (pulled by heapless and
+# static_cell) needs the critical-section provider, which the riscv crate
+# supplies via critical-section-single-hart (BootMCU Ibex is single-hart).
+portable-atomic   = { version = "1", features = ["critical-section"] }
 
 defmt = { version = "0.3", optional = true }
 
@@ -100,7 +137,6 @@ defmt-rtt  = "0.4"
 panic-halt = "0.2"
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
-defmt-rtt  = "0.4"
 panic-halt = "0.2"
 
 [profile.release]

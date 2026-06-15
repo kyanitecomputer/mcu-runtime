@@ -15,14 +15,11 @@
 //! # Hardware
 //!
 //! UART5 debug header at 115200 baud 8N1. Connect a USB-UART adapter to the
-//! AST1060 UART5 pins (see ast1060v19.pdf Section 7 pin table).
 
 #![no_std]
 #![no_main]
 
-use embassy_aspeed::{
-    uart::{Config as UartConfig, Uart},
-};
+use embassy_aspeed::uart::{Config as UartConfig, Uart};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 
@@ -62,7 +59,9 @@ fn format_counter<'a>(buf: &'a mut [u8; 32], n: u32) -> &'a [u8] {
         tmp[len] = b'0' + (v % 10) as u8;
         len += 1;
         v /= 10;
-        if v == 0 { break; }
+        if v == 0 {
+            break;
+        }
     }
     for i in (0..len).rev() {
         if pos < buf.len() - 2 {

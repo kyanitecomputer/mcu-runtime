@@ -73,7 +73,7 @@ fn main() -> ! {
         // Test 1: SysTick at Embassy's rate (1 MHz = every 25 cycles at 25 MHz)
         uart5_puts(b"Enabling SysTick (reload=24, 1MHz)...\r\n");
         ptr::write_volatile(SYST_RVR, 24); // reload = HCLK_HZ / 1_000_000 - 1 = 24
-        ptr::write_volatile(SYST_CVR, 0);  // clear current
+        ptr::write_volatile(SYST_CVR, 0); // clear current
         ptr::write_volatile(SYST_CSR, 0x07); // enable + interrupt + core clock
 
         // If we get here, SysTick didn't immediately fault
@@ -156,6 +156,8 @@ unsafe fn uart5_hex32(val: u32) {
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    unsafe { uart5_puts(b"\r\n!!! PANIC !!!\r\n"); }
+    unsafe {
+        uart5_puts(b"\r\n!!! PANIC !!!\r\n");
+    }
     loop {}
 }

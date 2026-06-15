@@ -27,11 +27,14 @@
 
 #![no_std]
 
-pub mod pfr;
-pub mod protocol;
 pub mod crypto;
-pub mod manifest;
-pub mod flash;
-pub mod provision;
 pub mod event_log;
+pub mod filter;
+pub mod flash;
+pub mod manifest;
+pub mod pfr;
 pub mod platform;
+pub mod protocol;
+pub mod provision;
+pub mod runtime;
+pub mod verify;
