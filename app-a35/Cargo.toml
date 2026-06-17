@@ -1,0 +1,20 @@
+[package]
+name        = "app-a35"
+version     = "0.1.0"
+edition     = "2021"
+description = "Bare-metal AArch64 firmware for AST2700 CA35 cores"
+publish     = false
+
+[[bin]]
+name = "hello_a35"
+path = "src/bin/hello_a35.rs"
+
+[[bin]]
+name = "probe_base_a35"
+path = "src/bin/probe_base_a35.rs"
+
+[profile.release]
+opt-level = "s"
+lto        = true
+debug      = false
+panic      = "abort"
