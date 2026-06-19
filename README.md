@@ -16,7 +16,7 @@ four runtime environments:
 │  AP Cores (main application processors)                          │
 │  AST2600: Cortex-A7      │  AST2700: Cortex-A35 ×4              │
 │  Runtime: bare-metal Go (TamaGo)                                 │
-│  Repo: aspeed-go                                                 │
+│  Repo: tamago  (HAL library: aspeed-go)                          │
 ├────────────────────────────────┬─────────────────────────────────┤
 │  RoT Cores                    │  Coprocessor Cores               │
 │  (Root of Trust / PFR)        │  (Sensor DAQ / Fan / IPC)        │
@@ -75,8 +75,8 @@ aspeed-mcu-runtime/
 │       └── Makefile
 └── tools/
     ├── ast1060-load/           UART boot loader (Go)
-    ├── gen-flash-image.sh
-    └── gen-uart-image.sh
+    ├── aspeed-uart-load/       AST10x0/AST2700 UART loader (Go)
+    └── imgtools/               Flash/UART/AST2700 image tools (Go)
 ```
 
 ## Supported SoCs
@@ -88,7 +88,7 @@ aspeed-mcu-runtime/
 | **AST1060** | Cortex-M4F 200MHz | ARMv7E-M | PFR processor | `ast1060` | HW verified |
 | **AST1080** | Cortex-M4F 400MHz | ARMv7E-M | Hardened RoT (Caliptra, PUF, anti-tamper) | `ast1080` | Stub |
 | **AST1040** | Cortex-M4F 400MHz | ARMv7E-M | BIC / BMC (Caliptra, eSPI, USB) | `ast1040` | Stub |
-| **AST2700 BootMCU** | ibex RV32IMC 400MHz | RISC-V | Secure boot MCU (Caliptra lifecycle) | `ast2700-bootmcu` | Compiles |
+| **AST2700 BootMCU** | ibex RV32IMC 400MHz | RISC-V | Secure boot MCU (Caliptra lifecycle) | `ast2700-bootmcu` | HW verified |
 
 ### Coprocessor — Embassy Rust (app-coprocessor/ssp)
 
@@ -111,7 +111,8 @@ aspeed-mcu-runtime/
 |------|------|---------|
 | [`aspeed-rs`](https://github.com/kyanitecomputer/aspeed-rs) | Embassy HAL | app-rot, app-ssp |
 | [`aspeed-data`](https://github.com/kyanitecomputer/aspeed-data) | PAC + generated headers | transitive (Rust + C) |
-| [`aspeed-go`](https://github.com/kyanitecomputer/aspeed-go) | TamaGo HAL for AP cores | separate repo, IPC peer |
+| `tamago` | TamaGo fork — AST SoC/board packages for CA35 bare-metal Go | CA35 payload |
+| [`aspeed-go`](https://github.com/kyanitecomputer/aspeed-go) | Go MMIO primitives and HAL library consumed by TamaGo | transitive (Go) |
 
 ## Build
 
@@ -126,6 +127,56 @@ dagger call check-coldfire
 dagger call qemu-test --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
 ```
 
+### AST2700 full flash image with NATS CA35 payload
+
+The hardware-test image is built through Dagger using StageX containers. It
+builds:
+
+- AST2700 BootMCU firmware from `app-rot`
+- CA35 payload from `../cmd/nats`
+- AST2700 flash image using `tools/imgtools`
+
+Default build, without SSP/TSP payloads:
+
+```sh
+dagger call build-ast-2700-image \
+    --aspeed-rs ../aspeed-rs \
+    --aspeed-data ../aspeed-data \
+    --tamago ../tamago \
+    --tamago-go ../../tamago/tamago-go \
+    --cmd-nats ../cmd/nats \
+    --aspeed-go ../aspeed-go \
+    --lneto ../lneto \
+    --nats-server ../nats-server \
+    --scree ../scree \
+    --bmc-pb ../bmc-pb/ast2700a1 \
+    export --path ./out
+```
+
+Useful flags:
+
+```sh
+# Output image size/name and CA35 link layout.
+--image-size 32M
+--output-name ast2700_bootmcu_nats.bin
+--ca35-link-address 0x404000000
+--ca35-reserve 0x1000
+--go-build-tags linkcpuinit,ast2700dcscm
+
+# Optional M4 coprocessor payloads from bmc-pb.
+--include-ssp=true
+--include-tsp=true
+```
+
+The resulting flash image is exported under `./out/`.
+
+For local development without Dagger, the image stitcher is:
+
+```sh
+cd tools/imgtools
+GOWORK=off go run . spi-image --help
+```
+
 ## Flashing (AST1060 UART boot)
 
 ```sh
@@ -134,7 +185,8 @@ cargo build --bin rot_ast1060 --features ast1060 \
     --target thumbv7em-none-eabihf --release
 rust-objcopy --strip-all -O binary \
     target/thumbv7em-none-eabihf/release/rot_ast1060 /tmp/rot_ast1060.bin
-../tools/gen-uart-image.sh /tmp/rot_ast1060.bin /tmp/rot_ast1060_uart.bin
+GOWORK=off go run ../tools/imgtools uart-image \
+    --input /tmp/rot_ast1060.bin --output /tmp/rot_ast1060_uart.bin
 ../tools/ast1060-load/ast1060-load \
     -port /dev/ttyUSB0 -wait 30s -monitor /tmp/rot_ast1060_uart.bin
 ```
