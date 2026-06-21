@@ -1,16 +1,32 @@
 // Dagger CI module for aspeed-mcu-runtime.
 //
+// All containers use StageX images for reproducible, minimal builds. StageX
+// ships a pinned, rustup-less Rust toolchain, so the embedded firmware is
+// checked with -Zbuild-std=core (rust-src is bundled; RUSTC_BOOTSTRAP unlocks
+// it on stable).
+//
 // Usage (from the aspeed-mcu-runtime repo root):
 //
 //	dagger call check-rot --aspeed-rs ../aspeed-rs \
-//	                      --aspeed-data ../aspeed-data    # RoT firmware (AST10x0, BootMCU)
+//	                      --aspeed-data ../aspeed-data
 //	dagger call check-ssp --aspeed-rs ../aspeed-rs \
-//	                      --aspeed-data ../aspeed-data    # coprocessor firmware (AST2600 SSP)
-//	dagger call check-coldfire                            # ColdFire host tests
+//	                      --aspeed-data ../aspeed-data
+//	dagger call check-coldfire
 //	dagger call qemu-test --aspeed-rs ../aspeed-rs \
-//	                      --aspeed-data ../aspeed-data    # QEMU firmware test
+//	                      --aspeed-data ../aspeed-data
+//	dagger call build-ast-2700-image --aspeed-rs ../aspeed-rs \
+//	                              --aspeed-data ../aspeed-data \
+//	                              --tamago ../tamago \
+//	                              --tamago-go ../../tamago/tamago-go \
+//	                              --cmd-nats ../cmd/nats \
+//	                              --aspeed-go ../aspeed-go \
+//	                              --lneto ../lneto \
+//	                              --nats-server ../nats-server \
+//	                              --scree ../scree \
+//	                              --image-size 32M \
+//	                              --bmc-pb ../bmc-pb/ast2700a1 export --path ./out
 //	dagger call ci --aspeed-rs ../aspeed-rs \
-//	               --aspeed-data ../aspeed-data           # full pipeline
+//	               --aspeed-data ../aspeed-data
 package main
 
 import (
@@ -21,38 +37,43 @@ import (
 	"dagger/aspeed-mcu-runtime/internal/dagger"
 )
 
-const rustChannel = "nightly-2026-04-01"
+const (
+	// StageX container images for reproducible builds.
+	stagexRust   = "stagex/pallet-rust:sx2026.06.0"
+	stagexGo     = "stagex/pallet-go:sx2026.06.0"
+	stagexPallet = "stagex/pallet-cgo:sx2026.06.0" // go + clang/cc + make + coreutils
+	stagexLlvm   = "stagex/core-llvm:sx2026.06.0"
 
-// rotTargets: RoT firmware binaries (AST10x0, AST2700 BootMCU).
-// Built from app-rot/.
+	// StageX user-qemu is x86_64-only (no qemu-system-arm), so QEMU smoke
+	// tests use a Debian-based qemu image that ships qemu-system-arm with the
+	// Aspeed ast1030-evb machine. Pinned by digest for reproducibility.
+	qemuImage = "qemux/qemu-arm@sha256:39312360a8fdd723e61e9416f045e280912c6e307df9c9bc12ce791a1d070400"
+)
+
+const (
+	bootmcuTarget = "riscv32imc-unknown-none-elf"
+	bootmcuBin    = "rot_ast2700_bootmcu"
+	// No portable_atomic_unsafe_assume_single_core cfg: app-rot deliberately
+	// uses portable-atomic's critical-section provider (riscv
+	// critical-section-single-hart), which is mutually exclusive with that cfg.
+	bootmcuFlags = "-C link-arg=-Tmemory.x -C link-arg=-Tlink.x -C link-arg=--nmagic"
+)
+
 var rotTargets = []struct{ bin, feature, triple string }{
-	// RoT firmware entry points
 	{"rot_ast1060", "ast1060", "thumbv7em-none-eabihf"},
 	{"rot_ast2700_bootmcu", "ast2700-bootmcu", "riscv32imc-unknown-none-elf"},
-	// Diagnostics
 	{"hello_uart_ast1060", "ast1060", "thumbv7em-none-eabihf"},
 	{"hello_uart_bootmcu", "ast2700-bootmcu", "riscv32imc-unknown-none-elf"},
 	{"uart5_bare", "ast1060", "thumbv7em-none-eabihf"},
 	{"uart5_systick", "ast1060", "thumbv7em-none-eabihf"},
-	// AST1080 and AST1040 require HAL support in embassy-aspeed first:
-	// {"rot_ast1080", "ast1080", "thumbv7em-none-eabihf"},
-	// {"rot_ast1040", "ast1040", "thumbv7em-none-eabihf"},
 }
 
-// sspTargets: coprocessor firmware binaries (AST2600 SSP, future AST2700 SSP/TSP).
-// Built from app-coprocessor/ssp/.
 var sspTargets = []struct{ bin, feature, triple string }{
-	// Coprocessor firmware entry points
 	{"ssp_ast2600", "ast2600-ssp", "thumbv7m-none-eabi"},
-	// Diagnostics
 	{"hello_uart", "ast2600-ssp", "thumbv7m-none-eabi"},
 	{"ipc_echo", "ast2600-ssp", "thumbv7m-none-eabi"},
-	// AST2700 SSP/TSP require HAL support in embassy-aspeed first:
-	// {"ssp_ast2700", "ast2700-ssp", "thumbv7em-none-eabihf"},
-	// {"tsp_ast2700", "ast2700-tsp", "thumbv7em-none-eabihf"},
 }
 
-// qemuTargets: firmwares testable under QEMU.
 var qemuTargets = []struct {
 	bin, feature, triple, machine, expect string
 }{
@@ -63,7 +84,10 @@ type AspeedMcuRuntime struct{}
 
 // ── Container builders ────────────────────────────────────────────────────────
 
-// rustBase returns a Rust nightly container with all embedded targets.
+// rustBase returns a StageX Rust container. StageX ships a pinned, rustup-less
+// toolchain with no prebuilt bare-metal std, so the embedded firmware is checked
+// with -Zbuild-std=core (rust-src is bundled); RUSTC_BOOTSTRAP unlocks that
+// unstable flag on the pinned stable toolchain.
 func (m *AspeedMcuRuntime) rustBase(
 	src *dagger.Directory,
 	aspeedRs *dagger.Directory,
@@ -73,17 +97,9 @@ func (m *AspeedMcuRuntime) rustBase(
 	buildCache := dag.CacheVolume("cargo-build-aspeed-mcu-runtime")
 
 	return dag.Container().
-		From("rust:1-slim").
-		WithExec([]string{
-			"rustup", "toolchain", "install", rustChannel,
-			"--profile", "minimal",
-			"--target", "thumbv7m-none-eabi",
-			"--target", "thumbv7em-none-eabihf",
-			"--target", "riscv32imc-unknown-none-elf",
-			"--component", "rustfmt,clippy",
-			"--no-self-update",
-		}).
-		WithExec([]string{"rustup", "default", rustChannel}).
+		From(stagexRust).
+		WithEnvVariable("CARGO_HOME", "/usr/local/cargo").
+		WithEnvVariable("RUSTC_BOOTSTRAP", "1").
 		WithMountedCache("/usr/local/cargo/registry", cargoCache).
 		WithMountedCache("/build/target", buildCache).
 		WithDirectory("/build/aspeed-data", aspeedData).
@@ -91,7 +107,6 @@ func (m *AspeedMcuRuntime) rustBase(
 		WithDirectory("/build/aspeed-mcu-runtime", src)
 }
 
-// rotContainer returns a container with workdir set to app-rot.
 func (m *AspeedMcuRuntime) rotContainer(
 	src *dagger.Directory,
 	aspeedRs *dagger.Directory,
@@ -101,7 +116,6 @@ func (m *AspeedMcuRuntime) rotContainer(
 		WithWorkdir("/build/aspeed-mcu-runtime/app-rot")
 }
 
-// sspContainer returns a container with workdir set to app-coprocessor/ssp.
 func (m *AspeedMcuRuntime) sspContainer(
 	src *dagger.Directory,
 	aspeedRs *dagger.Directory,
@@ -111,37 +125,99 @@ func (m *AspeedMcuRuntime) sspContainer(
 		WithWorkdir("/build/aspeed-mcu-runtime/app-coprocessor/ssp")
 }
 
-// qemuContainer extends rotContainer with qemu-system-arm installed.
-func (m *AspeedMcuRuntime) qemuContainer(
+// qemuRunner returns a container that can execute ARM firmware under
+// qemu-system-arm. The firmware ELF is built separately in the StageX rust
+// container and copied in, so no cross-libc binary stitching is needed.
+func (m *AspeedMcuRuntime) qemuRunner() *dagger.Container {
+	return dag.Container().From(qemuImage)
+}
+
+// coldfireContainer builds a StageX pallet-cgo container for the ColdFire host
+// tests. pallet-cgo bundles make + a C compiler (cc = clang) + coreutils; the
+// distroless pallet-gcc image lacks make/shell. The host tests are portable
+// C11, so cc (clang) stands in for gcc — passed as CC=cc by CheckColdfire.
+func (m *AspeedMcuRuntime) coldfireContainer(src *dagger.Directory) *dagger.Container {
+	return dag.Container().
+		From(stagexPallet).
+		WithDirectory("/src", src).
+		WithWorkdir("/src/app-coprocessor/coldfire")
+}
+
+// bootmcuFirmwareELF builds the AST2700 BootMCU firmware ELF in the StageX rust
+// container. StageX ships no prebuilt riscv32 std, so core is built via
+// -Zbuild-std (RUSTC_BOOTSTRAP unlocks it on the pinned stable toolchain) —
+// the same rustup-less approach proven by CheckRot.
+func (m *AspeedMcuRuntime) bootmcuFirmwareELF(
 	src *dagger.Directory,
 	aspeedRs *dagger.Directory,
 	aspeedData *dagger.Directory,
-) *dagger.Container {
-	return m.rotContainer(src, aspeedRs, aspeedData).
+) *dagger.File {
+	elf := "/build/aspeed-mcu-runtime/app-rot/target/" +
+		bootmcuTarget + "/release/" + bootmcuBin
+	return m.rustBase(src, aspeedRs, aspeedData).
+		WithWorkdir("/build/aspeed-mcu-runtime/app-rot").
+		WithEnvVariable("RUSTFLAGS", bootmcuFlags).
 		WithExec([]string{
-			"apt-get", "update",
+			"cargo", "build",
+			"--target", bootmcuTarget,
+			"--release",
+			"--bin", bootmcuBin,
+			"--no-default-features",
+			"--features", "ast2700-bootmcu",
+			"-Z", "build-std=core",
 		}).
-		WithExec([]string{
-			"apt-get", "install", "-y", "--no-install-recommends",
-			"qemu-system-arm",
-		}).
-		WithExec([]string{
-			"rm", "-rf", "/var/lib/apt/lists/*",
-		})
+		File(elf)
 }
 
-// coldfireContainer builds a container with GCC for ColdFire host tests.
-func (m *AspeedMcuRuntime) coldfireContainer(src *dagger.Directory) *dagger.Container {
+// ast2700ImageContainer builds the Go/TamaGo CA35 payload and stitches the SPI
+// flash image with the Go imgtools helper (no python/shell). The Rust BootMCU
+// firmware ELF is built separately in the StageX rust container (see
+// bootmcuFirmwareELF) and copied in, so this container needs no Rust toolchain.
+func (m *AspeedMcuRuntime) ast2700ImageContainer(
+	src *dagger.Directory,
+	aspeedRs *dagger.Directory,
+	aspeedData *dagger.Directory,
+	tamago *dagger.Directory,
+	tamagoGo *dagger.Directory,
+	cmdNats *dagger.Directory,
+	aspeedGo *dagger.Directory,
+	lneto *dagger.Directory,
+	natsServer *dagger.Directory,
+	scree *dagger.Directory,
+	bmcPb *dagger.Directory,
+) *dagger.Container {
+	goCache := dag.CacheVolume("go-mod-cache")
+	goBuild := dag.CacheVolume("go-build-cache-tamago")
+
+	llvmObjcopy := dag.Container().From(stagexLlvm).File("/usr/bin/llvm-objcopy")
+
 	return dag.Container().
-		From("gcc:14").
-		WithDirectory("/src", src).
-		WithWorkdir("/src/app-coprocessor/coldfire")
+		From(stagexGo).
+		// LLVM objcopy from StageX for ELF → raw binary conversion.
+		WithFile("/usr/bin/llvm-objcopy", llvmObjcopy).
+		WithMountedCache("/go/pkg/mod", goCache).
+		WithMountedCache("/root/.cache/go-build", goBuild).
+		WithDirectory("/build/aspeed-data", aspeedData).
+		WithDirectory("/build/aspeed-rs", aspeedRs).
+		WithDirectory("/build/aspeed-mcu-runtime", src).
+		WithDirectory("/build/tamago", tamago).
+		WithDirectory("/build/tamago-go", tamagoGo).
+		WithDirectory("/build/cmd/nats", cmdNats).
+		WithDirectory("/build/aspeed-go", aspeedGo).
+		WithDirectory("/build/lneto", lneto).
+		WithDirectory("/build/nats-server", natsServer).
+		WithDirectory("/build/scree", scree).
+		WithDirectory("/build/bmc-pb", bmcPb).
+		WithNewFile("/build/go.work", "go 1.26.2\n\nuse (\n\t./tamago\n\t./aspeed-go\n\t./lneto\n\t./nats-server\n\t./scree\n\t./cmd/nats\n)\n").
+		WithExec([]string{"mkdir", "-p", "/out"}).
+		// Build the Go imgtools binary for image stitching.
+		WithEnvVariable("GOWORK", "off").
+		WithExec([]string{"go", "build", "-C", "/build/aspeed-mcu-runtime/tools/imgtools", "-o", "/usr/local/bin/imgtools", "."})
 }
 
 // ── Public functions ──────────────────────────────────────────────────────────
 
 // CheckRot compiles all RoT firmware binaries (AST10x0, AST2700 BootMCU).
-// Pass both sibling repos: --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
 func (m *AspeedMcuRuntime) CheckRot(
 	ctx context.Context,
 	// +defaultPath="."
@@ -157,6 +233,7 @@ func (m *AspeedMcuRuntime) CheckRot(
 				"--bin", t.bin,
 				"--features", t.feature,
 				"--target", t.triple,
+				"-Z", "build-std=core",
 			}).
 			Sync(ctx)
 		if err != nil {
@@ -167,7 +244,6 @@ func (m *AspeedMcuRuntime) CheckRot(
 }
 
 // CheckSsp compiles all coprocessor firmware binaries (AST2600 SSP).
-// Pass both sibling repos: --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
 func (m *AspeedMcuRuntime) CheckSsp(
 	ctx context.Context,
 	// +defaultPath="."
@@ -183,6 +259,7 @@ func (m *AspeedMcuRuntime) CheckSsp(
 				"--bin", t.bin,
 				"--features", t.feature,
 				"--target", t.triple,
+				"-Z", "build-std=core",
 			}).
 			Sync(ctx)
 		if err != nil {
@@ -198,15 +275,16 @@ func (m *AspeedMcuRuntime) CheckColdfire(
 	// +defaultPath="."
 	src *dagger.Directory,
 ) error {
+	// `make clean` first so any stale (locally-built, glibc-linked) host-test
+	// binaries in the source tree are rebuilt with the container's cc.
 	_, err := m.coldfireContainer(src).
-		WithExec([]string{"make", "check"}).
+		WithExec([]string{"make", "clean", "CC=cc"}).
+		WithExec([]string{"make", "check", "CC=cc"}).
 		Sync(ctx)
 	return err
 }
 
-// QemuTest builds AST1060 firmware and runs it under QEMU (ast1030-evb) to
-// verify UART output. Validates that the firmware boots and prints expected text.
-// Pass both sibling repos: --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
+// QemuTest builds AST1060 firmware and runs it under QEMU to verify UART output.
 func (m *AspeedMcuRuntime) QemuTest(
 	ctx context.Context,
 	// +defaultPath="."
@@ -214,25 +292,30 @@ func (m *AspeedMcuRuntime) QemuTest(
 	aspeedRs *dagger.Directory,
 	aspeedData *dagger.Directory,
 ) error {
-	ctr := m.qemuContainer(src, aspeedRs, aspeedData)
+	build := m.rotContainer(src, aspeedRs, aspeedData)
 
 	for _, t := range qemuTargets {
-		ctr = ctr.WithExec([]string{
+		built := build.WithExec([]string{
 			"cargo", "build",
 			"--bin", t.bin,
 			"--features", t.feature,
 			"--target", t.triple,
 			"--release",
+			"-Z", "build-std=core",
 		})
 
-		elf := fmt.Sprintf("target/%s/release/%s", t.triple, t.bin)
-		out, err := ctr.
+		elf := fmt.Sprintf(
+			"/build/aspeed-mcu-runtime/app-rot/target/%s/release/%s",
+			t.triple, t.bin,
+		)
+		out, err := m.qemuRunner().
+			WithFile("/fw.elf", built.File(elf)).
 			WithExec([]string{
 				"timeout", "10",
 				"qemu-system-arm",
 				"-M", t.machine,
 				"-nographic",
-				"-kernel", elf,
+				"-kernel", "/fw.elf",
 			}, dagger.ContainerWithExecOpts{
 				Expect: dagger.ReturnTypeAny,
 			}).
@@ -253,8 +336,109 @@ func (m *AspeedMcuRuntime) QemuTest(
 	return nil
 }
 
+// BuildAst2700Image builds BootMCU firmware + TamaGo payload and stitches
+// them into a complete SPI flash image using Go imgtools.
+func (m *AspeedMcuRuntime) BuildAst2700Image(
+	ctx context.Context,
+	// +defaultPath="."
+	src *dagger.Directory,
+	aspeedRs *dagger.Directory,
+	aspeedData *dagger.Directory,
+	tamago *dagger.Directory,
+	tamagoGo *dagger.Directory,
+	cmdNats *dagger.Directory,
+	aspeedGo *dagger.Directory,
+	lneto *dagger.Directory,
+	natsServer *dagger.Directory,
+	scree *dagger.Directory,
+	bmcPb *dagger.Directory,
+	// +default="32M"
+	imageSize string,
+	// +default="ast2700_bootmcu_nats.bin"
+	outputName string,
+	// +default="linkcpuinit,ast2700dcscm"
+	goBuildTags string,
+	// +default="0x404000000"
+	ca35LinkAddress string,
+	// +default="0x1000"
+	ca35Reserve string,
+	// +default=false
+	includeSsp bool,
+	// +default=false
+	includeTsp bool,
+) (*dagger.Directory, error) {
+	if imageSize == "" {
+		imageSize = "32M"
+	}
+	if outputName == "" {
+		outputName = "ast2700_bootmcu_nats.bin"
+	}
+	if goBuildTags == "" {
+		goBuildTags = "linkcpuinit,ast2700dcscm"
+	}
+	if ca35LinkAddress == "" {
+		ca35LinkAddress = "0x404000000"
+	}
+	if ca35Reserve == "" {
+		ca35Reserve = "0x1000"
+	}
+
+	spiImageArgs := []string{
+		"imgtools", "spi-image",
+		"--caliptra", "/build/bmc-pb/caliptra-fw.bin",
+		"--fmc", "/out/rot_ast2700_bootmcu.fmc.bin",
+		"--prebuilt", "1:/build/bmc-pb/ddr4_pmu_train_imem.bin",
+		"--prebuilt", "2:/build/bmc-pb/ddr4_pmu_train_dmem.bin",
+		"--prebuilt", "3:/build/bmc-pb/ddr4_2d_pmu_train_imem.bin",
+		"--prebuilt", "4:/build/bmc-pb/ddr4_2d_pmu_train_dmem.bin",
+		"--prebuilt", "5:/build/bmc-pb/ddr5_pmu_train_imem.bin",
+		"--prebuilt", "6:/build/bmc-pb/ddr5_pmu_train_dmem.bin",
+		"--prebuilt", "7:/build/bmc-pb/dp_fw.bin",
+		"--a35-payload", "/out/ast2700_nats.raw.bin",
+	}
+	if includeSsp {
+		spiImageArgs = append(spiImageArgs, "--ssp-payload", "/build/bmc-pb/ssp.bin")
+	}
+	if includeTsp {
+		spiImageArgs = append(spiImageArgs, "--tsp-payload", "/build/bmc-pb/tsp.bin")
+	}
+	spiImageArgs = append(spiImageArgs,
+		"--size", imageSize,
+		"--output", "/out/"+outputName,
+	)
+
+	firmware := m.bootmcuFirmwareELF(src, aspeedRs, aspeedData)
+
+	ctr := m.ast2700ImageContainer(src, aspeedRs, aspeedData, tamago, tamagoGo, cmdNats, aspeedGo, lneto, natsServer, scree, bmcPb).
+		// BootMCU firmware ELF (built in the StageX rust container) → raw bin.
+		WithFile("/out/rot_ast2700_bootmcu.elf", firmware).
+		WithExec([]string{"llvm-objcopy", "-O", "binary",
+			"/out/rot_ast2700_bootmcu.elf",
+			"/out/rot_ast2700_bootmcu.fmc.bin"}).
+		// Build NATS CA35 payload (Go/TamaGo) for hardware PHY testing.
+		WithWorkdir("/build/cmd/nats").
+		WithEnvVariable("GOOSPKG", "github.com/usbarmory/tamago").
+		WithEnvVariable("GOOS", "tamago").
+		WithEnvVariable("GOARCH", "arm64").
+		WithEnvVariable("GOTOOLCHAIN", "local").
+		WithEnvVariable("GOWORK", "/build/go.work").
+		WithExec([]string{"/build/tamago-go/bin/go", "build",
+			"-tags", goBuildTags,
+			"-ldflags", "-T " + ca35LinkAddress + " -R " + ca35Reserve,
+			"-o", "/out/ast2700_nats.elf",
+			".",
+		}).
+		WithExec([]string{"llvm-objcopy", "-O", "binary",
+			"/out/ast2700_nats.elf",
+			"/out/ast2700_nats.raw.bin"}).
+		// Stitch SPI flash image using Go imgtools (no Python).
+		WithWorkdir("/build/aspeed-mcu-runtime").
+		WithExec(spiImageArgs)
+
+	return ctr.Directory("/out").Sync(ctx)
+}
+
 // Ci runs the full pipeline: CheckRot + CheckSsp + CheckColdfire + QemuTest.
-// Pass both sibling repos: --aspeed-rs ../aspeed-rs --aspeed-data ../aspeed-data
 func (m *AspeedMcuRuntime) Ci(
 	ctx context.Context,
 	// +defaultPath="."
