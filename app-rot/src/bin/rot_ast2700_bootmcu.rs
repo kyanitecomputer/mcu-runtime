@@ -21,8 +21,8 @@ use embassy_aspeed::scu;
 use embassy_aspeed::spi;
 use embassy_aspeed::ssp_tsp;
 use embassy_executor::Spawner;
-use hal::uart::{Config, Uart};
 use heapless::spsc::Queue;
+use log::{error, info, warn};
 
 use panic_halt as _;
 
@@ -127,40 +127,27 @@ fn init_mac_rgmii_clk() {
     }
 }
 
-fn print_hex32(uart: &mut Uart, val: u32) {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut buf = [0u8; 10];
-    buf[0] = b'0';
-    buf[1] = b'x';
-    for i in 0..8 {
-        buf[2 + (7 - i)] = HEX[((val >> (i * 4)) & 0xF) as usize];
-    }
-    uart.blocking_write(&buf);
-}
-
-fn print_dram_error(uart: &mut Uart, err: hal::sdrammc::DramError) {
+fn dram_error_str(err: hal::sdrammc::DramError) -> &'static str {
     use hal::sdrammc::DramError;
-    uart.blocking_write(match err {
-        DramError::PhyInitTimeout => b"PhyInitTimeout",
-        DramError::SelfRefTimeout => b"SelfRefTimeout",
-        DramError::BistFail => b"BistFail",
-        DramError::NoPhyFirmware => b"NoPhyFirmware",
-    });
+    match err {
+        DramError::PhyInitTimeout => "PhyInitTimeout",
+        DramError::SelfRefTimeout => "SelfRefTimeout",
+        DramError::BistFail => "BistFail",
+        DramError::NoPhyFirmware => "NoPhyFirmware",
+    }
 }
 
 /// Reads the A35 boot header (written by imgtools spi-image) and returns the
 /// absolute BootMCU-space entry address to jump to. Halts on an invalid header
 /// rather than jumping to a guessed offset (which yields a silent hang).
-fn read_a35_entry_addr(uart: &mut Uart) -> usize {
+fn read_a35_entry_addr() -> usize {
     let base = SPI_BASE + RAW_A35_HEADER_FLASH_OFFSET;
     let magic = rd32(base);
     let entry_off = rd32(base + 4);
     let payload_len = rd32(base + 8);
     let check = rd32(base + 12);
     if magic != RAW_A35_HEADER_MAGIC || check != (magic ^ entry_off ^ payload_len) {
-        uart.blocking_write(b"A35 BOOT HEADER INVALID magic=");
-        print_hex32(uart, magic);
-        uart.blocking_write(b" - rebuild image with --psp-elf. Halting.\r\n");
+        error!("A35 BOOT HEADER INVALID magic={magic:#010X} - rebuild image with --psp-elf. Halting.");
         loop {}
     }
     A35_LOAD_ADDR + A35_LOAD_FUDGE + entry_off as usize
@@ -258,64 +245,62 @@ fn secure_boot_enabled() -> bool {
     rd32(SCU1_HWSTRAP1) & HWSTRAP1_EN_SECBOOT != 0
 }
 
-fn set_auth_manifest(uart: &mut Uart, hw: scu::HwRev) -> bool {
-    uart.blocking_write(b"Caliptra auth manifest... ");
+fn set_auth_manifest(hw: scu::HwRev) -> bool {
     if !Caliptra::is_rdy_for_rt() {
-        uart.blocking_write(b"SKIP (RT not ready)\r\n");
+        warn!("Caliptra auth manifest SKIP (RT not ready)");
         return !secure_boot_enabled();
     }
     let manifest = match Manifest::parse_for(hw).and_then(|m| m.image_slice(HDR_ID_SOC_MANIFEST)) {
         Ok(manifest) => manifest,
         Err(_) => {
-            uart.blocking_write(b"SKIP (no CMAN SoC manifest)\r\n");
+            warn!("Caliptra auth manifest SKIP (no CMAN SoC manifest)");
             return !secure_boot_enabled();
         }
     };
     match Caliptra::set_auth_manifest(manifest) {
         Ok(()) => {
-            uart.blocking_write(b"OK\r\n");
+            info!("Caliptra auth manifest OK");
             true
         }
         Err(_) => {
-            uart.blocking_write(b"FAIL\r\n");
+            error!("Caliptra auth manifest FAIL");
             !secure_boot_enabled()
         }
     }
 }
 
-fn populate_idevid(uart: &mut Uart, otp: &Otp) -> bool {
-    uart.blocking_write(b"Caliptra IDEVID... ");
+fn populate_idevid(otp: &Otp) -> bool {
     if !Caliptra::is_rdy_for_rt() {
-        uart.blocking_write(b"SKIP (RT not ready)\r\n");
+        warn!("Caliptra IDEVID SKIP (RT not ready)");
         return !secure_boot_enabled();
     }
 
     let tag = match otp.read_word(OTPCAL_IDEVID_TBS_OFFSET) {
         Ok(tag) => tag,
         Err(_) => {
-            uart.blocking_write(b"FAIL (OTP tag read)\r\n");
+            error!("Caliptra IDEVID FAIL (OTP tag read)");
             return !secure_boot_enabled();
         }
     };
     if tag == 0 {
-        uart.blocking_write(b"SKIP (OTP empty)\r\n");
+        warn!("Caliptra IDEVID SKIP (OTP empty)");
         return !secure_boot_enabled();
     }
     if tag != 0x8230 {
-        uart.blocking_write(b"FAIL (bad TBS tag)\r\n");
+        error!("Caliptra IDEVID FAIL (bad TBS tag)");
         return !secure_boot_enabled();
     }
 
     let len_word = match otp.read_word(OTPCAL_IDEVID_TBS_OFFSET + 1) {
         Ok(len) => len,
         Err(_) => {
-            uart.blocking_write(b"FAIL (OTP len read)\r\n");
+            error!("Caliptra IDEVID FAIL (OTP len read)");
             return !secure_boot_enabled();
         }
     };
     let tbs_size = len_word.swap_bytes() as usize + 4;
     if tbs_size > MAX_IDEVID_ECC384_TBS_SIZE {
-        uart.blocking_write(b"FAIL (TBS too large)\r\n");
+        error!("Caliptra IDEVID FAIL (TBS too large)");
         return !secure_boot_enabled();
     }
 
@@ -324,7 +309,7 @@ fn populate_idevid(uart: &mut Uart, otp: &Otp) -> bool {
         .read_bytes(OTPCAL_IDEVID_TBS_OFFSET, &mut tbs[..tbs_size])
         .is_err()
     {
-        uart.blocking_write(b"FAIL (OTP TBS read)\r\n");
+        error!("Caliptra IDEVID FAIL (OTP TBS read)");
         return !secure_boot_enabled();
     }
 
@@ -337,7 +322,7 @@ fn populate_idevid(uart: &mut Uart, otp: &Otp) -> bool {
             .read_bytes(OTPCAL_IDEVID_SIGN_OFFSET + 0x18, &mut sig_s)
             .is_err()
     {
-        uart.blocking_write(b"FAIL (OTP sig read)\r\n");
+        error!("Caliptra IDEVID FAIL (OTP sig read)");
         return !secure_boot_enabled();
     }
 
@@ -346,7 +331,7 @@ fn populate_idevid(uart: &mut Uart, otp: &Otp) -> bool {
         match Caliptra::get_idev_ecc384_cert(&tbs[..tbs_size], &sig_r, &sig_s, &mut cert_buf) {
             Ok(size) => size,
             Err(_) => {
-                uart.blocking_write(b"FAIL (GET)\r\n");
+                error!("Caliptra IDEVID FAIL (GET)");
                 return !secure_boot_enabled();
             }
         };
@@ -359,11 +344,11 @@ fn populate_idevid(uart: &mut Uart, otp: &Otp) -> bool {
                 cert_size,
             );
             IDEVID_CERT_SIZE = cert_size;
-            uart.blocking_write(b"OK\r\n");
+            info!("Caliptra IDEVID OK");
             true
         },
         Err(_) => {
-            uart.blocking_write(b"FAIL (POPULATE)\r\n");
+            error!("Caliptra IDEVID FAIL (POPULATE)");
             !secure_boot_enabled()
         }
     }
@@ -375,11 +360,10 @@ fn populate_idevid(uart: &mut Uart, otp: &Otp) -> bool {
 /// failure is tolerated only when secure boot is disabled. Uses `LoadAddress`
 /// so Caliptra hashes the image at the load address recorded in the manifest
 /// metadata for `A2_CA35_FW_ID` (no in-BootMCU digest needed).
-fn authorize_ca35_a2(uart: &mut Uart, image_size: u32) -> bool {
+fn authorize_ca35_a2(image_size: u32) -> bool {
     use embassy_aspeed::cptra::{ImageHashSource, IMAGE_DIGEST_SIZE};
-    uart.blocking_write(b"A2 authorize CA35... ");
     if !Caliptra::is_rdy_for_rt() {
-        uart.blocking_write(b"SKIP (RT not ready)\r\n");
+        warn!("A2 authorize CA35 SKIP (RT not ready)");
         return !secure_boot_enabled();
     }
     // digest is ignored for LoadAddress; Caliptra hashes the manifest-recorded
@@ -394,15 +378,15 @@ fn authorize_ca35_a2(uart: &mut Uart, image_size: u32) -> bool {
         image_size,
     ) {
         Ok(r) if r.is_authorized() => {
-            uart.blocking_write(b"OK\r\n");
+            info!("A2 authorize CA35 OK");
             true
         }
         Ok(_) => {
-            uart.blocking_write(b"DENIED\r\n");
+            warn!("A2 authorize CA35 DENIED");
             !secure_boot_enabled()
         }
         Err(_) => {
-            uart.blocking_write(b"FAIL\r\n");
+            error!("A2 authorize CA35 FAIL");
             !secure_boot_enabled()
         }
     }
@@ -410,19 +394,19 @@ fn authorize_ca35_a2(uart: &mut Uart, image_size: u32) -> bool {
 
 /// A2: locate the CA35 payload in the FLSH container, authorize it, load it to
 /// DRAM at `A35_LOAD_ADDR`, and return the entry address. `None` on failure.
-fn load_ca35_payload_a2(uart: &mut Uart, hw: scu::HwRev) -> Option<usize> {
+fn load_ca35_payload_a2(hw: scu::HwRev) -> Option<usize> {
     let manifest = match Manifest::parse_for(hw) {
         Ok(m) => m,
         Err(_) => {
-            uart.blocking_write(b"A2 FLSH parse FAIL\r\n");
+            error!("A2 FLSH parse FAIL");
             return None;
         }
     };
-	let img = manifest.find(A2_FLSH_ID_CA35)?;
+ 	let img = manifest.find(A2_FLSH_ID_CA35)?;
 
-	if !authorize_ca35_a2(uart, img.size) {
-		return None;
-	}
+ 	if !authorize_ca35_a2(img.size) {
+ 		return None;
+ 	}
 
 	// The SoC image is prefixed with the 16-byte CA35 boot header. Read it via
 	// XIP and recover the entry offset before copying; this removes the old
@@ -435,15 +419,12 @@ fn load_ca35_payload_a2(uart: &mut Uart, hw: scu::HwRev) -> Option<usize> {
 	let entry_off = rd32(hdr_addr + 4) as usize;
 	let payload_len = rd32(hdr_addr + 8);
 	let check = rd32(hdr_addr + 12);
-	if magic != RAW_A35_HEADER_MAGIC || check != (magic ^ (entry_off as u32) ^ payload_len) {
-		uart.blocking_write(b"A35 HEADER INVALID magic=");
-		print_hex32(uart, magic);
-		uart.blocking_write(b" - rebuild image (imgtools a35-header). Halting.\r\n");
-		return None;
-	}
+ 	if magic != RAW_A35_HEADER_MAGIC || check != (magic ^ (entry_off as u32) ^ payload_len) {
+ 		error!("A35 HEADER INVALID magic={magic:#010X} - rebuild image (imgtools a35-header). Halting.");
+ 		return None;
+ 	}
 
-	uart.blocking_write(b"Load A35 (A2 FLSH)... ");
-	if A2_CA35_LZ4 {
+ 	if A2_CA35_LZ4 {
 		// Compressed payload follows the header: expand from src[hdr..] into the
 		// DRAM load window.
 		let src = match manifest.image_slice(A2_FLSH_ID_CA35) {
@@ -455,11 +436,11 @@ fn load_ca35_payload_a2(uart: &mut Uart, hw: scu::HwRev) -> Option<usize> {
 		let dst = unsafe {
 			core::slice::from_raw_parts_mut(A2_CA35_LOAD_ADDR as *mut u8, A35_PAYLOAD_SIZE)
 		};
-		if embassy_aspeed::lz4::decompress_size_prepended_into(&src[A2_HDR_LEN..], dst).is_err() {
-			uart.blocking_write(b"LZ4 FAIL\r\n");
-			return None;
-		}
-	} else {
+ 		if embassy_aspeed::lz4::decompress_size_prepended_into(&src[A2_HDR_LEN..], dst).is_err() {
+ 			error!("Load A35 (A2 FLSH) LZ4 FAIL");
+ 			return None;
+ 		}
+ 	} else {
 		// Uncompressed: word-copy the payload (past the header) from the XIP
 		// window to DRAM, so raw payload byte 0 lands at A2_CA35_LOAD_ADDR.
 		// SAFETY: fixed CA35 payload window; validated by the manifest bounds.
@@ -469,11 +450,11 @@ fn load_ca35_payload_a2(uart: &mut Uart, hw: scu::HwRev) -> Option<usize> {
 				hdr_addr + A2_HDR_LEN,
 				img.size as usize - A2_HDR_LEN,
 			)
-		};
-	}
-	uart.blocking_write(b"OK\r\n");
-	Some(A2_CA35_LOAD_ADDR + entry_off)
-}
+ 		};
+ 	}
+ 	info!("Load A35 (A2 FLSH) OK");
+ 	Some(A2_CA35_LOAD_ADDR + entry_off)
+ }
 
 #[derive(Clone, Copy)]
 struct IpcEvent {
@@ -498,50 +479,45 @@ fn respond_ipc_status(ipc: &mut Ipc1, id: u8, request: &Payload) {
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     hal::init(hal::Config::default());
-    let mut uart = Uart::new_uart12(Config::default());
-    uart.blocking_write(b"\r\n=== AST2700 BootMCU RoT ===\r\n");
+    // UART12 is ROM-configured; install the log-crate global logger over it.
+    hal::log_uart::init(log::LevelFilter::Info);
+    info!("=== AST2700 BootMCU RoT ===");
 
     let (dev, hw) = scu::silicon_rev();
-    uart.blocking_write(match dev {
-        scu::DeviceId::Ast2750 => b"AST2750",
-        _ => b"AST27xx",
-    });
-    uart.blocking_write(match hw {
-        scu::HwRev::A1 => b" A1\r\n",
-        scu::HwRev::A2 => b" A2\r\n",
-        _ => b" ??\r\n",
-    });
+    let dev_str = match dev {
+        scu::DeviceId::Ast2750 => "AST2750",
+        _ => "AST27xx",
+    };
+    let hw_str = match hw {
+        scu::HwRev::A1 => "A1",
+        scu::HwRev::A2 => "A2",
+        _ => "??",
+    };
+    info!("{dev_str} {hw_str}");
 
     hal::wdt_ast2700::init();
     hal::extrst::init();
 
     let boot_mode = bootmode::detect();
-    uart.blocking_write(b"Boot mode: ");
-    uart.blocking_write(boot_mode.as_str().as_bytes());
-    uart.blocking_write(b"\r\n");
+    info!("Boot mode: {}", boot_mode.as_str());
 
     hal::sli::init_f();
     match hal::sli::init_r() {
         Ok(()) => {}
         Err(_) => {
-            uart.blocking_write(b"SLI TIMEOUT\r\n");
+            error!("SLI TIMEOUT");
             loop {}
         }
     }
     display::early_crt_clock_select();
     init_mac_rgmii_clk();
-    uart.blocking_write(b"MAC clk_sel1=");
-    print_hex32(&mut uart, rd32(SCU1_CLK_SEL1));
-    uart.blocking_write(b"\r\n");
+    info!("MAC clk_sel1={:#010X}", rd32(SCU1_CLK_SEL1));
     scu::apply_ibex_default_register_policy();
 
-    uart.blocking_write(b"DRAM... ");
     match hal::sdrammc::init() {
-        Ok(()) => uart.blocking_write(b"OK\r\n"),
+        Ok(()) => info!("DRAM OK"),
         Err(err) => {
-            uart.blocking_write(b"FAIL ");
-            print_dram_error(&mut uart, err);
-            uart.blocking_write(b"\r\n");
+            error!("DRAM FAIL {}", dram_error_str(err));
             loop {}
         }
     }
@@ -554,12 +530,7 @@ async fn main(_spawner: Spawner) {
     // instead released late from the running payload. The DPMCU only drives the
     // DP aux/link here (no framebuffer yet), so it does not contend for DRAM; the
     // CA35 still owns the display side (VLink, CRT timing, framebuffer, scanout).
-    uart.blocking_write(b"DP bring-up... ");
-    uart.blocking_write(if display::bring_up_dp() {
-        b"UP\r\n"
-    } else {
-        b"SKIP\r\n"
-    });
+    info!("DP bring-up... {}", if display::bring_up_dp() { "UP" } else { "SKIP" });
 
     ca35::init_ufs_axi_path();
     ca35::init_pci_e2m();
@@ -569,7 +540,7 @@ async fn main(_spawner: Spawner) {
     let otp = match Otp::new() {
         Ok(otp) => otp,
         Err(_) => {
-            uart.blocking_write(b"OTP init FAIL\r\n");
+            error!("OTP init FAIL");
             if secure_boot_enabled() {
                 loop {}
             }
@@ -577,39 +548,34 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    if !set_auth_manifest(&mut uart, hw) {
+    if !set_auth_manifest(hw) {
         loop {}
     }
-    if !populate_idevid(&mut uart, &otp) {
+    if !populate_idevid(&otp) {
         loop {}
     }
 
     // A2 boots from the FLSH container: locate + authorize + load the CA35
     // payload by identifier. A1 (and unknown steppings) use the raw-header path.
     let a35_entry_addr = if hw == scu::HwRev::A2 {
-        match load_ca35_payload_a2(&mut uart, hw) {
+        match load_ca35_payload_a2(hw) {
             Some(entry) => {
-                print_hex32(&mut uart, entry as u32);
-                uart.blocking_write(b"\r\n");
+                info!("A2 CA35 entry={:#010X}", entry as u32);
                 entry
             }
             None => {
-                uart.blocking_write(b"A2 CA35 load FAIL\r\n");
+                error!("A2 CA35 load FAIL");
                 loop {}
             }
         }
     } else {
-        let a35_entry_addr = read_a35_entry_addr(&mut uart);
+        let a35_entry_addr = read_a35_entry_addr();
 
-        uart.blocking_write(b"A35 load=");
-        print_hex32(&mut uart, A35_LOAD_ADDR as u32);
-        uart.blocking_write(b" entry=");
-        print_hex32(&mut uart, a35_entry_addr as u32);
-        uart.blocking_write(b" size=");
-        print_hex32(&mut uart, A35_PAYLOAD_SIZE as u32);
-        uart.blocking_write(b"\r\n");
+        info!(
+            "A35 load={:#010X} entry={:#010X} size={:#010X}",
+            A35_LOAD_ADDR as u32, a35_entry_addr as u32, A35_PAYLOAD_SIZE as u32
+        );
 
-        uart.blocking_write(b"Load A35... ");
         let a35_loaded = match boot_mode {
             BootMode::NorFlash => load_payload_word_copy_first(
                 RAW_A35_PAYLOAD_FLASH_OFFSET,
@@ -624,30 +590,28 @@ async fn main(_spawner: Spawner) {
             ),
         };
         if !a35_loaded {
-            uart.blocking_write(b"FAIL\r\n");
+            error!("Load A35 FAIL");
             loop {}
         }
-        uart.blocking_write(b"OK\r\n");
+        info!("Load A35 OK");
         a35_entry_addr
     };
 
-    uart.blocking_write(b"Load SSP... ");
     let ssp_loaded = load_payload_from_boot_media(
         boot_mode,
         RAW_SSP_PAYLOAD_FLASH_OFFSET,
         SSP_LOAD_ADDR,
         M4_PAYLOAD_SIZE,
     );
-    uart.blocking_write(if ssp_loaded { b"OK\r\n" } else { b"SKIP\r\n" });
+    info!("Load SSP {}", if ssp_loaded { "OK" } else { "SKIP" });
 
-    uart.blocking_write(b"Load TSP... ");
     let tsp_loaded = load_payload_from_boot_media(
         boot_mode,
         RAW_TSP_PAYLOAD_FLASH_OFFSET,
         TSP_LOAD_ADDR,
         M4_PAYLOAD_SIZE,
     );
-    uart.blocking_write(if tsp_loaded { b"OK\r\n" } else { b"SKIP\r\n" });
+    info!("Load TSP {}", if tsp_loaded { "OK" } else { "SKIP" });
 
     let mut ipc = Ipc1::new();
     let mut ipc_queue = Queue::<IpcEvent, 8>::new();
@@ -661,20 +625,19 @@ async fn main(_spawner: Spawner) {
         ssp_tsp::init_tsp(TSP_LOAD_ADDR, 0x0010_0000, false);
     }
 
-    uart.blocking_write(b"RVBAR0=");
-    print_hex32(&mut uart, rd32(0x12C0_2110));
-    uart.blocking_write(b"\r\n");
+    info!("RVBAR0={:#010X}", rd32(0x12C0_2110));
 
     // Confirm the CA35 reset-vector fetch target is present in DRAM (BootMCU
     // view) just before release. After release the CA35 owns UART12, so the
     // BootMCU stays silent from here on to avoid interleaving with the CA35
     // console output.
-	uart.blocking_write(b"CA35 entry ");
-	print_hex32(&mut uart, a35_entry_addr as u32);
-	uart.blocking_write(b"=");
-	print_hex32(&mut uart, rd32(a35_entry_addr));
-    uart.blocking_write(b"\r\nBootMCU done, releasing CA35 (UART -> CA35).\r\n");
-    embedded_io::Write::flush(&mut uart).ok();
+    info!(
+        "CA35 entry {:#010X}={:#010X}",
+        a35_entry_addr as u32,
+        rd32(a35_entry_addr)
+    );
+    info!("BootMCU done, releasing CA35 (UART -> CA35).");
+    log::logger().flush();
 
     ca35::release();
 

@@ -96,8 +96,10 @@ ast1040 = [
 ]
 ast2700-bootmcu = [
     "embassy-aspeed/ast2700-bootmcu",
+    "embassy-aspeed/log-uart",
     "dep:riscv",
     "dep:riscv-rt",
+    "dep:log",
 ]
 
 ast2700-bootmcu-defmt = [
@@ -131,6 +133,7 @@ static_cell       = "2"
 portable-atomic   = { version = "1", features = ["critical-section"] }
 
 defmt = { version = "0.3", optional = true }
+log   = { version = "0.4", default-features = false, optional = true }
 
 [target.'cfg(target_arch = "arm")'.dependencies]
 defmt-rtt  = "0.4"
