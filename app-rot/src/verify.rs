@@ -53,8 +53,7 @@ impl<const IMAGE_BUF: usize, const DIGEST_BUF: usize> ImageVerifier<IMAGE_BUF, D
         validate_manifest(manifest).map_err(VerificationError::Manifest)?;
         validate_anti_rollback(manifest, rollback).map_err(VerificationError::Manifest)?;
 
-        #[cfg(feature = "defmt")]
-        defmt::info!(
+        log::info!(
             "verifying {} firmware image(s)",
             manifest.verification_task_count()
         );
@@ -65,8 +64,7 @@ impl<const IMAGE_BUF: usize, const DIGEST_BUF: usize> ImageVerifier<IMAGE_BUF, D
                 .await?;
         }
 
-        #[cfg(feature = "defmt")]
-        defmt::info!("firmware manifest verification passed");
+        log::info!("firmware manifest verification passed");
 
         Ok(())
     }
@@ -87,8 +85,7 @@ impl<const IMAGE_BUF: usize, const DIGEST_BUF: usize> ImageVerifier<IMAGE_BUF, D
         M: VerificationMaterialProvider,
     {
         if manifest.images.is_empty() {
-            #[cfg(feature = "defmt")]
-            defmt::warn!("no firmware manifest images; unprovisioned verification bypass");
+            log::warn!("no firmware manifest images; unprovisioned verification bypass");
             return Ok(());
         }
 
@@ -136,8 +133,7 @@ impl<const IMAGE_BUF: usize, const DIGEST_BUF: usize> ImageVerifier<IMAGE_BUF, D
         let digest = &self.digest[..digest_len];
 
         if digest != material.expected_digest {
-            #[cfg(feature = "defmt")]
-            defmt::error!("firmware hash mismatch at offset=0x{:08x}", task.offset);
+            log::error!("firmware hash mismatch at offset=0x{:08x}", task.offset);
             return Err(VerificationError::Outcome(
                 VerificationOutcome::HashMismatch,
             ));
@@ -153,8 +149,7 @@ impl<const IMAGE_BUF: usize, const DIGEST_BUF: usize> ImageVerifier<IMAGE_BUF, D
             .await
             .map_err(|_| VerificationError::Outcome(VerificationOutcome::SignatureMismatch))?;
 
-        #[cfg(feature = "defmt")]
-        defmt::info!(
+        log::info!(
             "firmware image verified offset=0x{:08x} size={}",
             task.offset,
             task.size

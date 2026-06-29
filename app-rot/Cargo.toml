@@ -76,7 +76,7 @@ path = "src/bin/uart5_systick.rs"
 
 # ── Feature flags ──────────────────────────────────────────────────────────────
 [features]
-default = ["defmt"]
+default = []
 
 # SoC selection — exactly one per build invocation.
 ast1060 = [
@@ -99,16 +99,7 @@ ast2700-bootmcu = [
     "embassy-aspeed/log-uart",
     "dep:riscv",
     "dep:riscv-rt",
-    "dep:log",
 ]
-
-ast2700-bootmcu-defmt = [
-    "ast2700-bootmcu",
-    "defmt",
-    "embassy-aspeed/defmt-uart",
-]
-
-defmt = ["embassy-aspeed/defmt", "dep:defmt"]
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
 [dependencies]
@@ -132,11 +123,9 @@ static_cell       = "2"
 # supplies via critical-section-single-hart (BootMCU Ibex is single-hart).
 portable-atomic   = { version = "1", features = ["critical-section"] }
 
-defmt = { version = "0.3", optional = true }
-log   = { version = "0.4", default-features = false, optional = true }
+log = { version = "0.4", default-features = false }
 
 [target.'cfg(target_arch = "arm")'.dependencies]
-defmt-rtt  = "0.4"
 panic-halt = "0.2"
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]

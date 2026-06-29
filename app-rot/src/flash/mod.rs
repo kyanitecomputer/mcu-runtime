@@ -13,7 +13,6 @@
 //! truth. AST1060 uses four QSPI monitor instances; AST1080 uses three.
 
 /// Logical flash image slot.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
     Active,
@@ -24,7 +23,6 @@ pub enum Slot {
 }
 
 /// A byte range within a flash device.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Region {
     pub slot: Slot,
@@ -68,7 +66,6 @@ impl Region {
 }
 
 /// Flash layout validation error.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutError {
     EmptyRegion,
@@ -80,7 +77,6 @@ pub enum LayoutError {
 ///
 /// `N` is the number of regions; use the smallest `N` that covers your
 /// flash partition table so the type fits in on-stack space.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Layout<const N: usize> {
     regions: [Region; N],
@@ -144,7 +140,6 @@ impl<const N: usize> Layout<N> {
 // ── RecoveryPair / RecoveryPlan ───────────────────────────────────────────────
 
 /// Pairing between an active image and its recovery source.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecoveryPair {
     pub active: Region,
@@ -166,14 +161,12 @@ impl RecoveryPair {
 }
 
 /// Backend-independent recovery plan.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecoveryPlan<const N: usize> {
     pairs: [RecoveryPair; N],
 }
 
 /// Recovery-plan validation error.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryPlanError {
     EmptyPlan,
@@ -209,7 +202,6 @@ impl<const N: usize> RecoveryPlan<N> {
 ///
 /// Level 0 = first attempt; level [`RecoveryLevel::MAX`] = final attempt.
 /// After `MAX` the platform should emit [`crate::pfr::Event::RecoveryFailed`].
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RecoveryLevel(u8);
 

@@ -23,7 +23,6 @@ use embassy_executor::Spawner;
 use hal::cptra::Caliptra;
 use hal::uart::{Config, Uart};
 
-use defmt_rtt as _;
 use panic_halt as _;
 
 // Timer counter low word for entropy.

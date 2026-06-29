@@ -17,7 +17,6 @@ use crate::pfr;
 // ── Mailbox types ─────────────────────────────────────────────────────────────
 
 /// Logical mailbox peer independent of I2C/I3C transport.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MailboxPeer {
     Bmc,
@@ -25,7 +24,6 @@ pub enum MailboxPeer {
 }
 
 /// Mailbox command independent of the storage/transport backend.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MailboxCommand {
     None,
@@ -37,7 +35,6 @@ pub enum MailboxCommand {
 }
 
 /// Protocol event delivered to the PFR state machine adapter.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProtocolEvent {
     pub peer: MailboxPeer,
@@ -89,7 +86,6 @@ impl ProtocolEvent {
 // ── Checkpoint types ──────────────────────────────────────────────────────────
 
 /// Firmware checkpoint class independent of watchdog hardware.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckpointKind {
     Bmc,
@@ -98,7 +94,6 @@ pub enum CheckpointKind {
 }
 
 /// Firmware boot progress independent of mailbox register layout.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckpointProgress {
     Started,
@@ -109,7 +104,6 @@ pub enum CheckpointProgress {
 }
 
 /// A checkpoint event from the platform mailbox.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CheckpointEvent {
     pub kind: CheckpointKind,
@@ -150,7 +144,6 @@ impl CheckpointEvent {
 // ── UpdateIntent ──────────────────────────────────────────────────────────────
 
 /// Update intent carried by a BMC or PCH mailbox message.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UpdateIntent {
     pub peer: MailboxPeer,
@@ -198,7 +191,6 @@ impl UpdateIntent {
 // ── SecureState ───────────────────────────────────────────────────────────────
 
 /// Platform secure-state value exposed via mailbox and protocol.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecureState {
     Unprovisioned,

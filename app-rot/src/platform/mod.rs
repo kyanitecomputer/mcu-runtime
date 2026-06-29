@@ -1,7 +1,7 @@
 //! Platform abstraction traits and hardware-independent command types.
 //!
 //! All traits here are `no_std`/no-alloc friendly and deliberately free of
-//! Embassy, defmt, or HAL imports.  Hardware-specific implementations live in
+//! Embassy, logging, or HAL imports.  Hardware-specific implementations live in
 //! the sub-modules below or in `embassy-aspeed`.
 //!
 //! # Usage pattern
@@ -164,7 +164,6 @@ impl PlatformPolicy for DefaultPolicy {
 /// Marked `#[non_exhaustive]` so adding variants in the future is not a
 /// breaking change for downstream executors.
 #[non_exhaustive]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformCommand {
     /// Assert target reset lines and switch SPI monitors to RoT ownership.

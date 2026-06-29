@@ -26,7 +26,6 @@
 //! ```
 
 /// Provisioning command received from the authenticated management channel.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionCommand {
     /// Write the root public-key hash into OTP (irreversible).
@@ -46,7 +45,6 @@ pub enum ProvisionCommand {
 }
 
 /// Provisioning operation status returned to the management channel.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionStatus {
     Idle,
@@ -57,7 +55,6 @@ pub enum ProvisionStatus {
 }
 
 /// Provisioning state-transition error.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionError {
     /// The provisioning fields are locked; the command is not allowed.

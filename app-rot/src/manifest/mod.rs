@@ -13,7 +13,6 @@
 // ── RegionPermissions ─────────────────────────────────────────────────────────
 
 /// Access policy for a PFM flash region.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegionPermissions {
     pub read: bool,
@@ -47,7 +46,6 @@ impl RegionPermissions {
 // ── Algorithm enums ───────────────────────────────────────────────────────────
 
 /// Hash algorithm named by a manifest.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
     Sha256,
@@ -67,7 +65,6 @@ impl HashAlgorithm {
 }
 
 /// Signature algorithm named by a manifest.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignatureAlgorithm {
     EcdsaP384,
@@ -79,7 +76,6 @@ pub enum SignatureAlgorithm {
 // ── ProtectedRegion / ImageDescriptor ─────────────────────────────────────────
 
 /// One protected address range from a PFM.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProtectedRegion {
     pub offset: u32,
@@ -114,7 +110,6 @@ impl ProtectedRegion {
 }
 
 /// Image metadata required for hashing and signature verification.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageDescriptor {
     pub offset: u32,
@@ -158,7 +153,6 @@ impl<'a> PlatformFirmwareManifest<'a> {
 // ── VerificationTask / VerificationRequest / VerificationOutcome ──────────────
 
 /// Parser-independent work item consumed by the verification engine.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerificationTask {
     pub offset: u32,
@@ -181,7 +175,6 @@ impl From<ImageDescriptor> for VerificationTask {
 }
 
 /// Work item combining a task with the key needed to verify it.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerificationRequest {
     pub task: VerificationTask,
@@ -201,7 +194,6 @@ impl VerificationRequest {
 }
 
 /// Outcome of a single image verification attempt.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationOutcome {
     Passed,
@@ -292,7 +284,6 @@ impl<const N: usize> Default for VerificationQueue<N> {
 // ── Key types ─────────────────────────────────────────────────────────────────
 
 /// Public-key class referenced by a signed manifest.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyKind {
     Root,
@@ -302,7 +293,6 @@ pub enum KeyKind {
 }
 
 /// Parser-independent key metadata.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyDescriptor {
     pub kind: KeyKind,
@@ -353,7 +343,6 @@ impl<'a> KeyManifest<'a> {
 // ── AFM types ─────────────────────────────────────────────────────────────────
 
 /// Attestation firmware manifest descriptor independent of wire format.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AfmDescriptor {
     pub offset: u32,
@@ -398,7 +387,6 @@ impl<'a> AfmManifest<'a> {
 ///
 /// Deliberately agnostic of OTP hardware; the OTP driver resolves the
 /// minimum SVN and passes it in.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AntiRollbackPolicy {
     pub minimum_svn: u32,
@@ -414,7 +402,6 @@ impl AntiRollbackPolicy {
 // ── Error types ───────────────────────────────────────────────────────────────
 
 /// Manifest-level policy validation error.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestError {
     EmptyImages,
@@ -429,7 +416,6 @@ pub enum ManifestError {
 }
 
 /// Key descriptor validation error.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestKeyError {
     EmptyDigest,
@@ -437,7 +423,6 @@ pub enum ManifestKeyError {
 }
 
 /// AFM descriptor validation error.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AfmError {
     EmptyDescriptor,

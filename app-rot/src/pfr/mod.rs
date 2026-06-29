@@ -17,7 +17,6 @@
 //! - **Lockdown**: Terminal state when all recovery attempts are exhausted.
 
 /// PFR state machine states.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     /// Initial platform setup before targets are held in reset.
@@ -37,7 +36,6 @@ pub enum State {
 }
 
 /// PFR state machine events.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     /// Initial boot event.
@@ -61,7 +59,6 @@ pub enum Event {
 }
 
 /// Platform component associated with an event or action.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Component {
     Platform,
@@ -72,7 +69,6 @@ pub enum Component {
 }
 
 /// Event plus component metadata for protocol and monitor tasks.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventRecord {
     pub event: Event,
@@ -106,7 +102,6 @@ pub const fn event_for(event: Event, component: Component) -> EventRecord {
 }
 
 /// Reason the state machine entered `Recover` or `Lockdown`.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryReason {
     VerificationFailed,
@@ -118,7 +113,6 @@ pub enum RecoveryReason {
 /// Hardware-independent action requested by a state transition.
 ///
 /// The embedding executor maps each variant to concrete platform calls.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     None,
@@ -131,7 +125,6 @@ pub enum Action {
 }
 
 /// Whether an event produced a state change.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventDisposition {
     Transitioned,
@@ -139,7 +132,6 @@ pub enum EventDisposition {
 }
 
 /// Result of processing one event.
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Transition {
     pub state: State,

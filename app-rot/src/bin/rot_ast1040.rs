@@ -18,7 +18,6 @@
 
 use embassy_executor::Spawner;
 
-use defmt_rtt as _;
 use panic_halt as _;
 
 #[embassy_executor::main]

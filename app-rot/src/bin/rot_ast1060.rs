@@ -40,7 +40,6 @@ use static_cell::StaticCell;
 static EVENTS: EventChannel = EventChannel::new();
 static EXECUTOR: StaticCell<Executor> = StaticCell::new();
 
-use defmt_rtt as _;
 use panic_halt as _;
 
 #[entry]

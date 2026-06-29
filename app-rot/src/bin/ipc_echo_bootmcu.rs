@@ -18,7 +18,6 @@ use embedded_io::Write as _;
 use hal::ipc1::Ipc1;
 use hal::uart::{Config, Uart};
 
-use defmt_rtt as _;
 use panic_halt as _;
 
 /// Non-secure CA35 sub-channel index.

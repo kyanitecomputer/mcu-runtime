@@ -87,8 +87,7 @@ pub fn apply_ast1060_spi_policy(policy: &SpiFilterPolicy) {
 
         if policy.is_bypass() {
             mon.set_filter_enable(false);
-            #[cfg(feature = "defmt")]
-            defmt::warn!("SPIPF{} bypass enabled for unprovisioned mode", inst);
+            log::warn!("SPIPF{} bypass enabled for unprovisioned mode", inst);
             continue;
         }
 
@@ -100,8 +99,7 @@ pub fn apply_ast1060_spi_policy(policy: &SpiFilterPolicy) {
         mon.set_irq_enable(true, true, true);
         mon.set_filter_enable(true);
 
-        #[cfg(feature = "defmt")]
-        defmt::info!("SPIPF{} policy applied", inst);
+        log::info!("SPIPF{} policy applied", inst);
     }
 }
 

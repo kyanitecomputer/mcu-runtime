@@ -20,7 +20,6 @@ use embassy_aspeed::sli::SliError;
 use embassy_executor::Spawner;
 use hal::uart::{Config, Uart};
 
-use defmt_rtt as _;
 use panic_halt as _;
 
 const DRAM_BASE: usize = 0x8000_0000;
