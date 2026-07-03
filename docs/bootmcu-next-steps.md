@@ -196,14 +196,13 @@ flashrom -p <programmer> -w aspeed-mcu-runtime/tools/ast2700_bootmcu_tamago_hell
 picocom /dev/ttyUSB3 -b 115200
 ```
 
-## UART defmt logging
+## UART logging
 
-`rot_ast2700_bootmcu` emits binary `defmt` frames on ROM-configured UART12.
-Decode with the matching `defmt-print` version and the BootMCU ELF as the symbol
-source. If using a serial device directly, select its 115200 8N1 serial backend;
-otherwise capture raw UART bytes and pipe them to `defmt-print` with the ELF.
+`rot_ast2700_bootmcu` logs via the `log` crate through a UART global logger
+(`embassy_aspeed::log_uart`) on the ROM-configured UART12. Output is plain text
+— `LEVEL target: message` lines at 115200 8N1 — so any serial terminal shows it
+directly; no `defmt-print` / ELF decoding step. defmt has been retired across
+the runtime and the HAL.
 
-```sh
-ELF=aspeed-mcu-runtime/aspeed-mcu-target/riscv32imc-unknown-none-elf/release/rot_ast2700_bootmcu
-defmt-print --help
-```
+The maximum level is set at boot with `hal::log_uart::init(LevelFilter::Info)`;
+raise it to `Debug`/`Trace` there for more verbose bring-up output.
