@@ -88,10 +88,6 @@ const A2_CA35_LOAD_ADDR: usize = 0x83FF_FF60;
 /// Length of the CA35 boot header prefixed to the SoC image (see manifest
 /// RAW_A35_HEADER_*: magic, entry_off, payload_len, check — four u32 words).
 const A2_HDR_LEN: usize = 16;
-/// Whether the CA35 payload SoC image is LZ4-compressed (size-prepended). The
-/// current gen-a2-image.sh stores it uncompressed; flip once the pipeline
-/// compresses it.
-const A2_CA35_LZ4: bool = false;
 
 static mut IDEVID_CERT: [u8; MAX_IDEVID_ECC384_CERT_SIZE] = [0; MAX_IDEVID_ECC384_CERT_SIZE];
 static mut IDEVID_CERT_SIZE: usize = 0;
@@ -424,34 +420,16 @@ fn load_ca35_payload_a2(hw: scu::HwRev) -> Option<usize> {
  		return None;
  	}
 
- 	if A2_CA35_LZ4 {
-		// Compressed payload follows the header: expand from src[hdr..] into the
-		// DRAM load window.
-		let src = match manifest.image_slice(A2_FLSH_ID_CA35) {
-			Ok(s) => s,
-			Err(_) => return None,
-		};
-		// SAFETY: A2_CA35_LOAD_ADDR..+A35_PAYLOAD_SIZE is the fixed CA35 payload
-		// window in DRAM and does not overlap any live reference.
-		let dst = unsafe {
-			core::slice::from_raw_parts_mut(A2_CA35_LOAD_ADDR as *mut u8, A35_PAYLOAD_SIZE)
-		};
- 		if embassy_aspeed::lz4::decompress_size_prepended_into(&src[A2_HDR_LEN..], dst).is_err() {
- 			error!("Load A35 (A2 FLSH) LZ4 FAIL");
- 			return None;
- 		}
- 	} else {
-		// Uncompressed: word-copy the payload (past the header) from the XIP
-		// window to DRAM, so raw payload byte 0 lands at A2_CA35_LOAD_ADDR.
-		// SAFETY: fixed CA35 payload window; validated by the manifest bounds.
-		unsafe {
-			embassy_aspeed::manifest::copy32(
-				A2_CA35_LOAD_ADDR,
-				hdr_addr + A2_HDR_LEN,
-				img.size as usize - A2_HDR_LEN,
-			)
- 		};
- 	}
+	// Uncompressed: word-copy the payload (past the header) from the XIP
+	// window to DRAM, so raw payload byte 0 lands at A2_CA35_LOAD_ADDR.
+	// SAFETY: fixed CA35 payload window; validated by the manifest bounds.
+	unsafe {
+		embassy_aspeed::manifest::copy32(
+			A2_CA35_LOAD_ADDR,
+			hdr_addr + A2_HDR_LEN,
+			img.size as usize - A2_HDR_LEN,
+		)
+	};
  	info!("Load A35 (A2 FLSH) OK");
  	Some(A2_CA35_LOAD_ADDR + entry_off)
  }
