@@ -13,8 +13,8 @@ use embassy_aspeed::cptra::{Caliptra, MAX_IDEVID_ECC384_CERT_SIZE, MAX_IDEVID_EC
 use embassy_aspeed::display;
 use embassy_aspeed::ipc1::{Ipc1, Payload};
 use embassy_aspeed::manifest::{
-    self, Manifest, HDR_ID_SOC_MANIFEST, RAW_A35_HEADER_FLASH_OFFSET, RAW_A35_HEADER_MAGIC,
-    RAW_A35_PAYLOAD_FLASH_OFFSET,
+    self, Manifest, HDR_ID_SOC_MANIFEST, RAW_A35_HEADER_FLASH_OFFSET, RAW_A35_HEADER_M77_MAGIC,
+    RAW_A35_HEADER_MAGIC, RAW_A35_PAYLOAD_FLASH_OFFSET,
 };
 use embassy_aspeed::otp::Otp;
 use embassy_aspeed::scu;
@@ -415,21 +415,42 @@ fn load_ca35_payload_a2(hw: scu::HwRev) -> Option<usize> {
 	let entry_off = rd32(hdr_addr + 4) as usize;
 	let payload_len = rd32(hdr_addr + 8);
 	let check = rd32(hdr_addr + 12);
- 	if magic != RAW_A35_HEADER_MAGIC || check != (magic ^ (entry_off as u32) ^ payload_len) {
+	let compressed = magic == RAW_A35_HEADER_M77_MAGIC;
+ 	if (magic != RAW_A35_HEADER_MAGIC && !compressed)
+ 		|| check != (magic ^ (entry_off as u32) ^ payload_len)
+ 	{
  		error!("A35 HEADER INVALID magic={magic:#010X} - rebuild image (imgtools a35-header). Halting.");
  		return None;
  	}
 
-	// Uncompressed: word-copy the payload (past the header) from the XIP
-	// window to DRAM, so raw payload byte 0 lands at A2_CA35_LOAD_ADDR.
-	// SAFETY: fixed CA35 payload window; validated by the manifest bounds.
-	unsafe {
-		embassy_aspeed::manifest::copy32(
-			A2_CA35_LOAD_ADDR,
-			hdr_addr + A2_HDR_LEN,
-			img.size as usize - A2_HDR_LEN,
-		)
-	};
+	// The payload follows the 16-byte header in the XIP window. SAFETY for both
+	// paths: A2_CA35_LOAD_ADDR..+A35_PAYLOAD_SIZE is the fixed CA35 DRAM window
+	// and does not overlap any live reference; source bounds come from the
+	// manifest image size.
+	let payload_addr = hdr_addr + A2_HDR_LEN;
+	let payload_bytes = img.size as usize - A2_HDR_LEN;
+	if compressed {
+		// m77rip stream: decompress from the XIP window into the DRAM window and
+		// verify the decoded length matches the header's uncompressed length.
+		let src = unsafe { core::slice::from_raw_parts(payload_addr as *const u8, payload_bytes) };
+		let dst = unsafe {
+			core::slice::from_raw_parts_mut(A2_CA35_LOAD_ADDR as *mut u8, A35_PAYLOAD_SIZE)
+		};
+		match m77rip_decode::decompress_into(src, dst) {
+			Ok(written) if written == payload_len as usize => {}
+			Ok(written) => {
+				error!("Load A35 (A2 FLSH) m77 size mismatch: got {written} want {payload_len}");
+				return None;
+			}
+			Err(_) => {
+				error!("Load A35 (A2 FLSH) m77 decompress FAIL");
+				return None;
+			}
+		}
+	} else {
+		// Uncompressed: word-copy the payload so raw byte 0 lands at the load addr.
+		unsafe { embassy_aspeed::manifest::copy32(A2_CA35_LOAD_ADDR, payload_addr, payload_bytes) };
+	}
  	info!("Load A35 (A2 FLSH) OK");
  	Some(A2_CA35_LOAD_ADDR + entry_off)
  }

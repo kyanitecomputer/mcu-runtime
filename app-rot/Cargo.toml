@@ -99,6 +99,7 @@ ast2700-bootmcu = [
     "embassy-aspeed/log-uart",
     "dep:riscv",
     "dep:riscv-rt",
+    "dep:m77rip-decode",
 ]
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
@@ -124,6 +125,9 @@ static_cell       = "2"
 portable-atomic   = { version = "1", features = ["critical-section"] }
 
 log = { version = "0.4", default-features = false }
+# m77rip decompression for the A2 CA35 payload (no_std, no-alloc). Matches the
+# vein/vega loader; compression happens in the image pipeline (m77rip-compress).
+m77rip-decode = { git = "https://github.com/paddor/m77rip", default-features = false, optional = true }
 
 [target.'cfg(target_arch = "arm")'.dependencies]
 panic-halt = "0.2"
