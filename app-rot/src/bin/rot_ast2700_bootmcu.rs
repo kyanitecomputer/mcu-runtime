@@ -85,6 +85,11 @@ const A2_CA35_FW_ID: u32 = 9;
 // offset of _rt0 within the raw payload. The BootMCU reads it at load time, so
 // growing the cairn payload never requires bumping a constant here again.
 const A2_CA35_LOAD_ADDR: usize = 0x83FF_FF60;
+/// Scratch DRAM for staging the m77rip-compressed CA35 stream before decoding.
+/// Well above the decompressed load window (which can be tens of MB) and below
+/// the SSP/TSP load addresses (0xAC00_0000/0xAE00_0000); transient — the CA35
+/// may reuse this DRAM once it runs.
+const A2_CA35_M77_STAGE_ADDR: usize = 0x9000_0000;
 /// Length of the CA35 boot header prefixed to the SoC image (see manifest
 /// RAW_A35_HEADER_*: magic, entry_off, payload_len, check — four u32 words).
 const A2_HDR_LEN: usize = 16;
@@ -424,26 +429,31 @@ fn load_ca35_payload_a2(hw: scu::HwRev) -> Option<usize> {
  	}
 
 	// The payload follows the 16-byte header in the XIP window. SAFETY for both
-	// paths: A2_CA35_LOAD_ADDR..+A35_PAYLOAD_SIZE is the fixed CA35 DRAM window
-	// and does not overlap any live reference; source bounds come from the
-	// manifest image size.
+	// paths: the CA35 DRAM windows below are fixed regions that do not overlap
+	// any live reference; source bounds come from the manifest image size.
 	let payload_addr = hdr_addr + A2_HDR_LEN;
 	let payload_bytes = img.size as usize - A2_HDR_LEN;
 	if compressed {
-		// m77rip stream: decompress from the XIP window into the DRAM window and
-		// verify the decoded length matches the header's uncompressed length.
-		let src = unsafe { core::slice::from_raw_parts(payload_addr as *const u8, payload_bytes) };
-		let dst = unsafe {
-			core::slice::from_raw_parts_mut(A2_CA35_LOAD_ADDR as *mut u8, A35_PAYLOAD_SIZE)
-		};
+		// The SPI XIP window only supports 32-bit reads, but m77rip-decode reads
+		// its input byte-wise, so first stage the compressed stream into DRAM via
+		// copy32 (word reads). Then decompress DRAM->DRAM into the load window,
+		// sized to the header's uncompressed length (the payload can exceed the
+		// legacy 16 MB A35_PAYLOAD_SIZE).
+		let compressed_len = payload_bytes;
+		let uncompressed_len = payload_len as usize;
+		unsafe { embassy_aspeed::manifest::copy32(A2_CA35_M77_STAGE_ADDR, payload_addr, compressed_len) };
+		let src =
+			unsafe { core::slice::from_raw_parts(A2_CA35_M77_STAGE_ADDR as *const u8, compressed_len) };
+		let dst =
+			unsafe { core::slice::from_raw_parts_mut(A2_CA35_LOAD_ADDR as *mut u8, uncompressed_len) };
 		match m77rip_decode::decompress_into(src, dst) {
-			Ok(written) if written == payload_len as usize => {}
+			Ok(written) if written == uncompressed_len => {}
 			Ok(written) => {
-				error!("Load A35 (A2 FLSH) m77 size mismatch: got {written} want {payload_len}");
+				error!("Load A35 (A2 FLSH) m77 size mismatch: got {written} want {uncompressed_len}");
 				return None;
 			}
 			Err(_) => {
-				error!("Load A35 (A2 FLSH) m77 decompress FAIL");
+				error!("Load A35 (A2 FLSH) m77 decompress FAIL (compressed={compressed_len} uncompressed={uncompressed_len})");
 				return None;
 			}
 		}
