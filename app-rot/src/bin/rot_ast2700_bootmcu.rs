@@ -434,26 +434,35 @@ fn load_ca35_payload_a2(hw: scu::HwRev) -> Option<usize> {
 	let payload_addr = hdr_addr + A2_HDR_LEN;
 	let payload_bytes = img.size as usize - A2_HDR_LEN;
 	if compressed {
-		// The SPI XIP window only supports 32-bit reads, but m77rip-decode reads
-		// its input byte-wise, so first stage the compressed stream into DRAM via
-		// copy32 (word reads). Then decompress DRAM->DRAM into the load window,
-		// sized to the header's uncompressed length (the payload can exceed the
-		// legacy 16 MB A35_PAYLOAD_SIZE).
-		let compressed_len = payload_bytes;
-		let uncompressed_len = payload_len as usize;
-		unsafe { embassy_aspeed::manifest::copy32(A2_CA35_M77_STAGE_ADDR, payload_addr, compressed_len) };
+		// word 2 is the *exact* compressed length (see RAW_A35_HEADER_M77_MAGIC):
+		// the FLSH image is padded to 4 bytes, so img.size-16 can be longer than
+		// the stream and the strict decoder rejects trailing bytes.
+		let compressed_len = payload_len as usize;
+		// Stage the stream into DRAM: m77rip-decode reads its input byte-wise but
+		// the SPI XIP window only serves 32-bit reads. Prefer the FMC DMA engine
+		// (fast, 4-byte-granular); fall back to copy32 word reads if DMA declines.
+		let flash_offset = payload_addr - SPI_BASE;
+		let dma_len = (compressed_len + 3) & !3;
+		if !spi::ast2700_fmc_dma_read_sync(flash_offset, A2_CA35_M77_STAGE_ADDR, dma_len) {
+			unsafe {
+				embassy_aspeed::manifest::copy32(A2_CA35_M77_STAGE_ADDR, payload_addr, compressed_len)
+			};
+		}
 		let src =
 			unsafe { core::slice::from_raw_parts(A2_CA35_M77_STAGE_ADDR as *const u8, compressed_len) };
-		let dst =
-			unsafe { core::slice::from_raw_parts_mut(A2_CA35_LOAD_ADDR as *mut u8, uncompressed_len) };
+		// Decompress into the load window. Size the destination to the whole
+		// region up to the staging area (the payload can exceed the legacy 16 MB
+		// A35_PAYLOAD_SIZE); the decoder writes exactly the uncompressed length.
+		let dst = unsafe {
+			core::slice::from_raw_parts_mut(
+				A2_CA35_LOAD_ADDR as *mut u8,
+				A2_CA35_M77_STAGE_ADDR - A2_CA35_LOAD_ADDR,
+			)
+		};
 		match m77rip_decode::decompress_into(src, dst) {
-			Ok(written) if written == uncompressed_len => {}
-			Ok(written) => {
-				error!("Load A35 (A2 FLSH) m77 size mismatch: got {written} want {uncompressed_len}");
-				return None;
-			}
+			Ok(written) => info!("Load A35 (A2 FLSH) m77: {compressed_len} -> {written} B"),
 			Err(_) => {
-				error!("Load A35 (A2 FLSH) m77 decompress FAIL (compressed={compressed_len} uncompressed={uncompressed_len})");
+				error!("Load A35 (A2 FLSH) m77 decompress FAIL (compressed={compressed_len})");
 				return None;
 			}
 		}
