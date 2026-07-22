@@ -120,6 +120,15 @@ Reference: vein `loader/build.rs:39` `m77rip::compress`, decoded at boot by
 
 **Verify.** Flash an m77rip image; confirm CA35 boots to the same entry.
 
+**Status.** Decode path implemented and proven correct (host round-trip +
+hardware isolation). Compression is **opt-in** (`A35_COMPRESS=1`); the default
+is the verbatim raw payload. A compressed SoC image trips the BootROM/Caliptra
+secure-boot manifest stage *before* the FMC launches (the flashed compressed
+bytes don't match the runtime image Caliptra authorizes) — deterministically
+different Caliptra codes vs. the raw image, same FMC. Enabling compression
+depends on the WS5 Caliptra manifest work (authorizing a compressed/relocated
+SoC image, or excluding it from ROM-stage authorization).
+
 ---
 
 ## WS3 — Hardware mailbox inter-core IPC (protobuf/buffa)
@@ -240,6 +249,12 @@ exists.
    waits on the future fuse-provisioning build tooling.
 6. **Supporting driver commands**: implement `STASH_MEASUREMENT`, `QUOTE_PCRS`
    for measurement/attestation.
+7. **Compressed SoC image authorization** (unblocks WS2 compression): the
+   BootROM/Caliptra manifest stage authorizes SoC-image bytes as stored in the
+   FLSH container, so an m77rip-compressed CA35 image fails before the FMC runs.
+   Resolve by authorizing the compressed image (manifest measures the stored
+   bytes) or excluding the CA35 image from ROM-stage authorization and having
+   the FMC authorize the decompressed image instead.
 
 **Files.** `embassy-aspeed/src/{cptra.rs, manifest.rs, hace.rs, ecdsa.rs, new
 lms.rs}`, `app-rot/src/bin/rot_ast2700_bootmcu.rs`, `app-rot/src/manifest/mod.rs`.
