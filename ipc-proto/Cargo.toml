@@ -1,0 +1,11 @@
+# Empty [workspace] stops Cargo from absorbing this crate into a parent workspace.
+[workspace]
+
+[package]
+name = "ipc-proto"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Hand-rolled protobuf codec for the inter-core IPC envelope (schema/v1/ipc.proto), for cores without buffa (riscv32imc BootMCU)"
+
+[dependencies]

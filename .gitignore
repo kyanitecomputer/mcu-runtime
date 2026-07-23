@@ -2,6 +2,7 @@
 app-rot/target/
 app-coprocessor/ssp/target/
 app-a35/target/
+ipc-proto/target/
 
 # Cargo target dir (shared, via --target-dir) and build outputs
 /aspeed-mcu-target/
