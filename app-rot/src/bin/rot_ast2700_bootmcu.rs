@@ -22,6 +22,7 @@ use embassy_aspeed::spi;
 use embassy_aspeed::ssp_tsp;
 use embassy_executor::Spawner;
 use heapless::spsc::Queue;
+use ipc_proto::{Envelope, Payload as IpcMsg, RotStatus};
 use log::{error, info, warn};
 
 use panic_halt as _;
@@ -42,7 +43,13 @@ const SSP_LOAD_ADDR: usize = 0xAC00_0000;
 const TSP_LOAD_ADDR: usize = 0xAE00_0000;
 const SPI_BASE: usize = 0x2000_0000;
 const PAYLOAD_LOAD_ATTEMPTS: usize = 3;
+// IPC1 sub-channels to the CA35 application processor. Until TrustZone is
+// enabled the CA35 payload (cairn) runs in the non-secure world, so the RoT
+// serves IPC there. FUTURE: once the BootMCU↔PSP link runs in a TEE (secure
+// world), move this to IPC_SECURE_CA35 and require the secure sub-channel.
+#[allow(dead_code)]
 const IPC_SECURE_CA35: u8 = 0;
+const IPC_NONSECURE_CA35: u8 = 1;
 const SCU1_HWSTRAP1: usize = 0x14C0_2010;
 const HWSTRAP1_EN_SECBOOT: u32 = 1 << 5;
 const OTPCAL_IDEVID_TBS_OFFSET: u32 = embassy_aspeed::otp::CALIPTRA_START + 0x62;
@@ -480,18 +487,56 @@ struct IpcEvent {
     payload: Payload,
 }
 
-fn put_word(payload: &mut Payload, index: usize, value: u32) {
-    payload[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
+/// Pack the silicon identity into `RotStatus.silicon_rev`: (device << 16) | rev.
+fn pack_silicon_rev(dev: scu::DeviceId, hw: scu::HwRev) -> u32 {
+    let d: u32 = match dev {
+        scu::DeviceId::Ast2750 => 0x2750,
+        _ => 0x27FF,
+    };
+    let h: u32 = match hw {
+        scu::HwRev::A1 => 1,
+        scu::HwRev::A2 => 2,
+        _ => 0,
+    };
+    (d << 16) | h
 }
 
-fn respond_ipc_status(ipc: &mut Ipc1, id: u8, request: &Payload) {
-    let mut response = [0u8; 32];
-    response[..4].copy_from_slice(b"BMCU");
-    put_word(&mut response, 1, Caliptra::flow_status().0);
-    put_word(&mut response, 2, Caliptra::boot_status().0);
-    put_word(&mut response, 3, rd32(0x12C0_2110));
-    response[16..20].copy_from_slice(&request[..4]);
-    ipc.send(IPC_SECURE_CA35, id, &response);
+/// Current Root-of-Trust status reported over IPC.
+fn rot_status(dev: scu::DeviceId, hw: scu::HwRev) -> RotStatus {
+    RotStatus {
+        silicon_rev: pack_silicon_rev(dev, hw),
+        caliptra_flow_status: Caliptra::flow_status().0,
+        caliptra_boot_status: Caliptra::boot_status().0,
+        secure_boot_enabled: secure_boot_enabled(),
+        caliptra_rt_ready: Caliptra::is_rdy_for_rt(),
+    }
+}
+
+/// Handle one inbound IPC mailbox message from the CA35 and reply.
+///
+/// Transport framing: mailbox byte 0 is the protobuf length, bytes `1..=len` are
+/// the `IpcEnvelope` (schema/v1/ipc.proto). Ping is answered with Pong (echoing
+/// the nonce); GetRotStatus with RotStatus. The reply echoes the request `seq`.
+/// Messages fit in one 32-byte slot at this revision (no segmentation yet).
+fn handle_ipc(ipc: &mut Ipc1, id: u8, request: &Payload, dev: scu::DeviceId, hw: scu::HwRev) {
+    let len = request[0] as usize;
+    if len == 0 || len > ipc_proto::MAX_ENVELOPE_LEN {
+        return;
+    }
+    let env = match ipc_proto::decode(&request[1..=len]) {
+        Some(e) => e,
+        None => return,
+    };
+    let reply = match env.payload {
+        IpcMsg::Ping(nonce) => Envelope::new(env.seq, IpcMsg::Pong(nonce)),
+        IpcMsg::GetRotStatus => Envelope::new(env.seq, IpcMsg::RotStatus(rot_status(dev, hw))),
+        _ => return,
+    };
+    let mut frame = [0u8; 32];
+    if let Some(n) = ipc_proto::encode(&reply, &mut frame[1..]) {
+        frame[0] = n as u8;
+        ipc.send(IPC_NONSECURE_CA35, id, &frame);
+    }
 }
 
 #[embassy_executor::main]
@@ -670,16 +715,18 @@ async fn main(_spawner: Spawner) {
     let mut heartbeat = 0u32;
     loop {
         service_caliptra(&mut seed);
-        if let Some((id, payload)) = ipc.try_recv(IPC_SECURE_CA35) {
+        // Serve inter-core IPC from the (non-secure) CA35 over sub-channel 1.
+        if let Some((id, payload)) = ipc.try_recv(IPC_NONSECURE_CA35) {
             let _ = ipc_queue.enqueue(IpcEvent { id, payload });
         }
         if let Some(event) = ipc_queue.dequeue() {
-            respond_ipc_status(&mut ipc, event.id, &event.payload);
+            handle_ipc(&mut ipc, event.id, &event.payload, dev, hw);
         }
         heartbeat = heartbeat.wrapping_add(1);
-        if heartbeat % 10 == 0 && Caliptra::is_rdy_for_rt() {
+        // ~10 s Caliptra keepalive at the 100 ms poll cadence.
+        if heartbeat % 100 == 0 && Caliptra::is_rdy_for_rt() {
             let _ = Caliptra::fw_info();
         }
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
     }
 }

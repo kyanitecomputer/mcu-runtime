@@ -19,6 +19,10 @@
 
 #![cfg_attr(not(test), no_std)]
 
+/// Largest encoded envelope that fits one 32-byte mailbox slot after the 1-byte
+/// length prefix the transport prepends.
+pub const MAX_ENVELOPE_LEN: usize = 31;
+
 // Protobuf wire types.
 const WT_VARINT: u8 = 0;
 const WT_I64: u8 = 1;
@@ -99,7 +103,7 @@ fn get_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
 }
 
 fn put_tag(buf: &mut [u8], pos: &mut usize, field: u8, wire: u8) -> bool {
-    put_varint(buf, pos, (((field as u64) << 3) | wire as u64))
+    put_varint(buf, pos, ((field as u64) << 3) | wire as u64)
 }
 
 /// Encode a proto3 scalar `uint32` field, omitting it when zero (proto3 default).

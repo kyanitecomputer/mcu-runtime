@@ -128,6 +128,10 @@ log = { version = "0.4", default-features = false }
 # m77rip decompression for the A2 CA35 payload (no_std, no-alloc). Matches the
 # vein/vega loader; compression happens in the image pipeline (m77rip-compress).
 m77rip-decode = { git = "https://github.com/paddor/m77rip", default-features = false, optional = true }
+# Hand-rolled protobuf codec for the inter-core IPC envelope (schema/v1/ipc.proto).
+# buffa can't run on the atomic-less riscv32imc BootMCU, so this encodes the same
+# wire format by hand. no_std, no alloc.
+ipc-proto = { path = "../ipc-proto" }
 
 [target.'cfg(target_arch = "arm")'.dependencies]
 panic-halt = "0.2"
