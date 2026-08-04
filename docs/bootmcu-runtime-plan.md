@@ -131,11 +131,31 @@ SoC image, or excluding it from ROM-stage authorization).
 
 ---
 
-## WS3 — Hardware mailbox inter-core IPC (protobuf/buffa)
+## WS3 — Hardware mailbox inter-core IPC (protobuf)
 
-**Goal.** A proper Rust HW-mailbox IPC layer shared by the RISC-V RoT and the
-Cortex-M SSP/TSP, carrying protobuf messages defined in `./schema`, so the Go
-CA35 (PSP) and the Rust cores speak the same wire format.
+**Goal.** A HW-mailbox IPC layer carrying protobuf messages defined in `./schema`
+so every core speaks the same wire format.
+
+**Codec split (a hardware constraint, not a preference).** The `riscv32imc`
+BootMCU has no atomic compare-exchange, and buffa's deps (`bytes`, `once_cell`)
+require it — so buffa cannot build there. Therefore:
+- CA35 PSP (Go): `protoc-gen-go`.
+- SSP/TSP (Cortex-M4, has atomics): buffa (`kyanite-schema`).
+- BootMCU (riscv32imc): a hand-rolled protobuf codec (`aspeed-mcu-runtime/ipc-proto`)
+  producing the *same* proto3 wire bytes (cross-checked byte-for-byte against
+  protoc-gen-go), `no_std` + no alloc.
+
+**TrustZone / TEE.** The BootMCU serves IPC on IPC1 **sub-channel 1
+(non-secure CA35)** because the cairn CA35 payload currently runs non-secure.
+FUTURE: once TrustZone is enabled, move the BootMCU↔PSP link into a TEE (secure
+world) on **sub-channel 0** and require the secure sub-channel.
+
+**Status (first slice landed).** `ipc.proto` (`IpcEnvelope`: Ping/Pong,
+GetRotStatus/RotStatus); BootMCU responder over `Ipc1`; CA35 Go client that
+pings the RoT and reads `RotStatus` at boot. `[len][protobuf]` framing in one
+32-byte slot (segmentation deferred until a message exceeds 31 bytes).
+Remaining: shared-SRAM/doorbell transport for large payloads, and WS3c (SSP/TSP
+driver + buffa responder, needs the `ast2700-ssp/tsp` HAL features).
 
 **Current state.**
 - AST2700 IPC = register block, two instances `ipc0`/`ipc1`, 4 sub-channels ×
