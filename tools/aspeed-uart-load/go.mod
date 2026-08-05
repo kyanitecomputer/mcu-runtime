@@ -1,4 +1,4 @@
-module github.com/kyanitecomputer/aspeed-mcu-runtime/tools/aspeed-uart-load
+module src.kyanite.computer/aspeed-mcu-runtime/tools/aspeed-uart-load
 
 go 1.26.1
 

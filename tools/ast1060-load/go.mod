@@ -1,4 +1,4 @@
-module github.com/kyanitecomputer/aspeed-mcu-runtime/tools/ast1060-load
+module src.kyanite.computer/aspeed-mcu-runtime/tools/ast1060-load
 
 go 1.26.1
 
