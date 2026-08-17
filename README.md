@@ -2,6 +2,10 @@
 
 Firmware applications for ASPEED MCU cores.
 
+Part of the [Kyanite](https://github.com/kyanitecomputer) stack.
+
+> **Status:** experimental — expect breaking changes.
+
 ```
 https://github.com/kyanitecomputer/aspeed-mcu-runtime
 ```
@@ -190,3 +194,17 @@ GOWORK=off go run ../tools/imgtools uart-image \
 ../tools/ast1060-load/ast1060-load \
     -port /dev/ttyUSB0 -wait 30s -monitor /tmp/rot_ast1060_uart.bin
 ```
+
+## Contributing
+
+See the org-wide [CONTRIBUTING guide](https://github.com/kyanitecomputer/.github/blob/main/CONTRIBUTING.md).
+Contributions are dual-licensed.
+
+## Security
+
+See the org-wide [SECURITY policy](https://github.com/kyanitecomputer/.github/blob/main/SECURITY.md).
+
+## License
+
+Dual-licensed under either of Apache-2.0 ([LICENSE-APACHE](LICENSE-APACHE)) or
+MIT ([LICENSE-MIT](LICENSE-MIT)) at your option.
