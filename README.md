@@ -6,37 +6,10 @@ Part of the [Kyanite](https://github.com/kyanitecomputer) stack.
 
 > **Status:** experimental — expect breaking changes.
 
-```
-https://github.com/kyanitecomputer/aspeed-mcu-runtime
-```
-
 ## System architecture
 
 ASPEED BMC SoCs contain multiple processor cores spanning three ISAs and
-four runtime environments:
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  AP Cores (main application processors)                          │
-│  AST2600: Cortex-A7      │  AST2700: Cortex-A35 ×4              │
-│  Runtime: bare-metal Go (TamaGo)                                 │
-│  Repo: tamago  (HAL library: aspeed-go)                          │
-├────────────────────────────────┬─────────────────────────────────┤
-│  RoT Cores                    │  Coprocessor Cores               │
-│  (Root of Trust / PFR)        │  (Sensor DAQ / Fan / IPC)        │
-│                                │                                  │
-│  AST1060 Cortex-M4F (ARM)    │  AST2600 SSP Cortex-M3 (ARM)    │
-│  AST1080 Cortex-M4F (ARM)    │  AST2700 SSP Cortex-M4 (ARM)    │
-│  AST1040 Cortex-M4F (ARM)    │  AST2700 TSP Cortex-M4 (ARM)    │
-│  AST2700 BootMCU RV32 (RISC-V)│ AST2400/2500 ColdFire V1 (M68K)│
-│  Runtime: Rust + Embassy       │  Runtime: Rust + Embassy (ARM)  │
-│  Crate: app-rot                │           C + async.h (ColdFire)│
-│                                │  Crates: app-coprocessor/ssp    │
-│                                │          app-coprocessor/coldfire│
-├────────────────────────────────┴─────────────────────────────────┤
-│  Shared: aspeed-rs (HAL) → aspeed-data (PAC)                     │
-└──────────────────────────────────────────────────────────────────┘
-```
+four runtime environments, all sharing `aspeed-rs` (HAL) → `aspeed-data` (PAC):
 
 | ISA | Cores | Runtime | Language |
 |-----|-------|---------|----------|

@@ -6,8 +6,6 @@ the Aspeed AST2400 and AST2500 BMC SoCs.
 See **ROADMAP.md** for the full specification, memory architecture, and
 implementation status.
 
----
-
 ## 10-minute quickstart
 
 ### Prerequisites
@@ -26,7 +24,7 @@ lacks CFV1 multilib and will produce incorrect code.
 ### Clone and build
 
 ```sh
-git clone <this-repo> ast-cf-runtime
+git clone https://github.com/kyanitecomputer/ast-cf-runtime
 cd ast-cf-runtime/template
 make          # produces firmware.elf + firmware.bin
 make size     # confirm binary fits in DRAM window
@@ -50,8 +48,6 @@ No cross-compiler or hardware needed:
 ```sh
 make check          # 24 tests across executor, async.h, and mailbox ring
 ```
-
----
 
 ## Async discipline — the one rule that trips everyone
 
@@ -81,8 +77,6 @@ async good_task(good_t *ctx) {
 3. Never `switch` inside an async function (conflicts with Duff's device).
 4. ISRs set flags only — no logic, no calls to async functions.
 5. No blocking calls — every wait is `await(condition)`.
-
----
 
 ## Writing a task
 
@@ -131,8 +125,6 @@ include $(SDK_DIR)/sdk.mk
 SRCS    += main.c
 ```
 
----
-
 ## Configuration
 
 All knobs have safe defaults.  Set before `include $(SDK_DIR)/sdk.mk`:
@@ -153,8 +145,6 @@ the ARM Linux kernel in the device tree.  Add to your DTS:
 /* Reserve Timer 7 for ColdFire SDK tick */
 &timer { aspeed,timer-forbidden = <7>; };
 ```
-
----
 
 ## SRAM layout
 
@@ -177,8 +167,6 @@ CF BE 0x329000  └────────────────────�
 
 The ARM firmware must not write above the SDK header boundary after CF reset.
 
----
-
 ## Adding a HAL driver (SC-7 checklist)
 
 Adding a new peripheral requires exactly these files — no executor, startup,
@@ -192,8 +180,6 @@ or build system changes:
 
 The UART driver (`src/hal/uart.c`) was added in M5 without touching any other
 file — verifying SC-7.
-
----
 
 ## Target smoke tests (future — M7)
 
