@@ -124,7 +124,9 @@ static_cell       = "2"
 # supplies via critical-section-single-hart (BootMCU Ibex is single-hart).
 portable-atomic   = { version = "1", features = ["critical-section"] }
 
-log = { version = "0.4", default-features = false }
+# Compile informational logging out of release firmware. Warnings and errors remain
+# available for field diagnostics, while development builds retain all log levels.
+log = { version = "0.4", default-features = false, features = ["release_max_level_warn"] }
 # m77rip decompression for the A2 CA35 payload (no_std, no-alloc). Matches the
 # vein/vega loader; compression happens in the image pipeline (m77rip-compress).
 m77rip-decode = { git = "https://github.com/paddor/m77rip", default-features = false, optional = true }
